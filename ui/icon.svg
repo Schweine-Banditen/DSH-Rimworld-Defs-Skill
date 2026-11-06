@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="RimWorld Defs">
+  <rect x="6" y="10" width="52" height="44" rx="7" fill="#20506b"/>
+  <rect x="11" y="15" width="42" height="34" rx="4" fill="#e9f2f7"/>
+  <path d="M11 23h42" stroke="#20506b" stroke-width="2.4"/>
+  <path d="M18 31h20M18 37h14M18 43h10" stroke="#3c7fa6" stroke-width="2.4" stroke-linecap="round"/>
+  <circle cx="47" cy="44" r="7" fill="#d98b3a"/>
+  <path d="M44.5 44l2 2 4-4.5" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

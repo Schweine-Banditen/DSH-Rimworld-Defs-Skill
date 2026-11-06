@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "RimWorld 定义查看器",
+    "description": "查询原版与官方 DLC 的 Def 资料：中英文名、分类、ParentName 链、MayRequire 与贴图。"
+  }
+}
