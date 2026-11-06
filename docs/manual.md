@@ -147,6 +147,7 @@ ui/client.js（React 面板：sidebar.panellist + main）
 5. 禁止 force push、改写历史、擅自添加 remote 或推送。
 6. 安装/卸载 bundle 会改 profile 全局状态，先征得使用者同意。
 7. 每次功能合并后更新本手册与 `AGENTS.md` 的“已知限制/下一步”。
+8. **对既有代码做大范围修改前先询问可行性**：说明影响面、风险与回滚方案，获得确认后再动手。
 
 ## 11. 当前版本状态（供交接）
 
