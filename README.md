@@ -172,7 +172,7 @@ python scripts/extract_defs.py --game "<RimWorld 根目录>" --check  # 确认�
 
 - **defType 大小写变体**：`BackStoryDef`（1 处）归并为 `BackstoryDef`，`jobDef`（6 处）归并为 `JobDef`。
 - **Abstract 模板与具体 def 同名**：例如 `PawnKindDef Mercenary_Slasher` 既有抽象模板又有具体 def，`defName` 重复属正常；查询层应按 `Abstract` 过滤。
-- **无 defName 的 Def**：53 个 `SongDef` 只有 `clipPath` 等字段；查询时不可按 `defName` 命中。
+- **无 defName 的 Def**：`SongDef` 共 77 个，其中 53 个没有 `defName`（只有 `clipPath` 等字段）；查询时不可按 `defName` 命中。
 - **跨类型继承**：8 处（`FleckDef→ThingDef`、`ThingDef→FleckDef`、`StructureLayoutDef→StructureStructureLayoutDef` 等）。
 - **字段级 MayRequire**：101 个 def 的某个顶层子元素带条件，记录在 `conditionalFields`。
 - **中文翻译的两种载体**：Core 为 `DefInjected` 目录（514 个文件），DLC 只有 `<语言>.tar`；脚本两者都读。
