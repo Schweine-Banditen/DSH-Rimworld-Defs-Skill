@@ -7,6 +7,7 @@
  */
 import { readFileSync, statSync } from 'node:fs'
 import { spawn } from 'node:child_process'
+import { resolve as resolvePath, sep } from 'node:path'
 
 export const name = 'rimworld-defs-ui'
 
@@ -337,6 +338,45 @@ export function apply(ctx, config = {}) {
           record: hit.record,
         })),
       })
+    }
+    if (path === `${API_PREFIX}/keys`) {
+      const { payload } = loadData()
+      const keys = new Set()
+      for (const record of payload.defs || []) {
+        const fields = record.fields
+        if (!fields) continue
+        for (const name of Object.keys(fields.scalars || {})) keys.add(name)
+        if (fields.statBases && fields.statBases.value) {
+          for (const name of Object.keys(fields.statBases.value)) keys.add(name)
+        }
+        if (fields.comps && fields.comps.value) {
+          for (const comp of fields.comps.value) {
+            if (comp.class) keys.add(comp.class)
+            for (const name of Object.keys(comp.props || {})) keys.add(name)
+          }
+        }
+        if (record.category) keys.add(record.category)
+        for (const name of record.thingCategories || []) keys.add(name)
+      }
+      return json({ keys: [...keys].sort((a, b) => a.localeCompare(b)) })
+    }
+    if (path === `${API_PREFIX}/xml`) {
+      const rel = url.searchParams.get('path') || ''
+      if (!rel.startsWith('Data/') || !rel.endsWith('.xml') || rel.includes('..')) {
+        return new Response('bad path', { status: 400 })
+      }
+      const root = resolvePath(gameRoot)
+      const full = resolvePath(root, rel)
+      if (!full.startsWith(root + sep)) return new Response('bad path', { status: 400 })
+      try {
+        const stat = statSync(full)
+        if (stat.size > 4 * 1024 * 1024) return new Response('file too large', { status: 413 })
+        return new Response(readFileSync(full, 'utf8'), {
+          headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+        })
+      } catch {
+        return new Response('not found', { status: 404 })
+      }
     }
     if (path === `${API_PREFIX}/icon`) {
       const tex = url.searchParams.get('tex') || ''
