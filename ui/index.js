@@ -11,6 +11,9 @@ import { resolve as resolvePath, sep } from 'node:path'
 
 export const name = 'rimworld-defs-ui'
 
+// 必须等 webServer 就绪后再 apply；否则冷启动时会拿不到服务、路由不会注册。
+export const inject = ['webServer']
+
 const API_PREFIX = '/rimworld-defs/api'
 
 /** 浏览树的分类标准（固定顺序）：先匹配先归类，覆盖不到的进「其他」。 */
@@ -113,7 +116,7 @@ function classify(record, lookup) {
 }
 
 export function apply(ctx, config = {}) {
-  const web = ctx.get('webServer')
+  const web = ctx.webServer
   if (!web) {
     ctx.logger?.warn?.('rimworld-defs: webServer unavailable, panel API disabled')
     return
