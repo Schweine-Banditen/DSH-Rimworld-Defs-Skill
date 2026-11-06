@@ -1,0 +1,72 @@
+# ==========================================================
+# RimWorld Mod 仓库忽略规则
+# 原则：仓库只存「源码 + 资源」，不存「编译产物」与「游戏本体文件」
+# ==========================================================
+
+# ---------- 编译产物 ----------
+# 每次构建都会重新生成，提交进来只会造成冲突和仓库膨胀
+obj/
+bin/
+*.pdb
+*.nupkg
+packages/
+project.assets.json
+*.nuget.props
+
+# ---------- RimWorld 编译输出 ----------
+# Assemblies/ 里的 DLL 是构建产物，发行走 Steam Workshop，不进源码仓库。
+# 如果之后你希望仓库「克隆下来就能直接用」，把下面两行注释掉即可：
+Assemblies/*.dll
+Assemblies/*.pdb
+
+# ---------- 游戏本体文件（有版权，严禁提交）----------
+# Assembly-CSharp.dll / UnityEngine.dll 等属于 Ludeon 与 Unity，公开发布会引发版权问题
+Assembly-CSharp*.dll
+UnityEngine*.dll
+Unity*.dll
+0Harmony.dll
+MonoMod*.dll
+Mono.Cecil*.dll
+
+# ---------- IDE / 编辑器 ----------
+.vs/
+.idea/
+*.suo
+*.user
+*.userprefs
+*.DotSettings.user
+*.sln.DotSettings.user
+.vscode/
+*.VC.db
+*.VC.opendb
+
+# ---------- 操作系统垃圾文件 ----------
+Thumbs.db
+ehthumbs.db
+desktop.ini
+.DS_Store
+*.swp
+*~
+
+# ---------- 打包 / 发布产物 ----------
+*.zip
+*.7z
+*.rar
+Release/
+release/
+Dist/
+dist/
+
+# ---------- 本地临时目录 ----------
+tmp/
+temp/
+logs/
+*.log
+
+# ==========================================================
+# 刻意【不】忽略的文件，请保留在版本控制中：
+#   About/About.xml         Mod 元数据，必须提交
+#   About/Preview.png       创意工坊缩略图，必须提交
+#   About/PublishedFileId.txt  Steam 创意工坊条目 ID，提交可避免团队重复上传
+#   *.cs / *.xml / *.png 等  源码与资源，全部提交
+# ==========================================================

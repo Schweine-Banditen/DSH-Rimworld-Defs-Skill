@@ -1,0 +1,34 @@
+# ==========================================================
+# 换行与文本/二进制识别规则
+# 未强制 eol=lf，交由系统配置 core.autocrlf=true 掌管
+# 仓库内存 LF、工作区检出 CRLF，符合 Windows 单平台习惯
+# 若之后要做跨平台协作，把下面这行改为：  * text=auto eol=lf
+# ==========================================================
+* text=auto
+
+# ---------- 文本类型 ----------
+*.cs        text diff=csharp
+*.xml       text
+*.xaml      text
+*.json      text
+*.md        text
+*.txt       text
+*.yml       text
+*.yaml      text
+*.projitems text
+*.csproj    text
+*.sln       text
+
+# ---------- 二进制类型（禁止换行符转换）----------
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.bmp       binary
+*.dds       binary
+*.psd       binary
+*.ogg       binary
+*.wav       binary
+*.mp3       binary
+*.dll       binary
+*.pdb       binary
