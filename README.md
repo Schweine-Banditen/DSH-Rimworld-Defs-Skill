@@ -40,6 +40,8 @@ JSON 记录的是 **Def XML 的模板层面信息**（每个 `Def` 节点写了�
 │   └── verify_defs.py        # 抽样校验（测试专用，不参与运行时）
 ├── docs/
 │   └── verify-testing.md     # 校验工具使用说明
+├── assets/
+│   └── placeholder.jpg       # 贴图缺失时的占位图（UI 阶段使用）
 └── data/                     # 生成的 JSON（.gitignore 忽略）
     ├── .gitkeep
     └── .gitignore
@@ -88,7 +90,7 @@ python scripts/extract_defs.py --game "<RimWorld 根目录>" --check  # 确认�
 
 ```json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "generatedAt": "...",
   "gameVersion": "1.7.5000 rev1275",
   "gameRoot": "...",
@@ -154,9 +156,34 @@ python scripts/extract_defs.py --game "<RimWorld 根目录>" --check  # 确认�
 | `MayRequire` / `MayRequireAnyOf` | 原始条件字符串，**不判断当前是否满足** |
 | `category` | `<category>` 顶层大类；**语义随 defType 变化**（ThingDef 为 `Item/Building`，StatDef 为 `PawnWork` 等），跨类型混用无意义 |
 | `thingCategories` | `<thingCategories><li>` 细分类列表（可能与 `category` 同时存在） |
+| `graphic` | 贴图引用：`texPath` / `graphicClass` / `uiIconPath`（自有）+ `own` + `effective`（沿父链解析出的有效贴图与来源） |
 | `conditionalFields` | 顶层子元素上的字段级条件（如某个字段只在 Odyssey 下生效） |
 | `source` | `Core`/`Royalty`/…，**严格按文件路径判定** |
 | `sourcePath` | 相对游戏根目录的路径（正斜杠） |
+
+## 贴图引用（graphic）
+
+`graphic` 只存**引用**，不存图片副本。原版纹理在游戏根目录 `Assets.zip` 内（ZIP 方法 93 = ZSTD，需 Python 3.14；条目形如 `Resources/Textures/Things/Item/Resource/Steel/Steel_a.psd.dds.split`，内容为 DDS）。
+
+```json
+"graphic": {
+  "texPath": null,
+  "graphicClass": null,
+  "uiIconPath": null,
+  "own": false,
+  "effective": {
+    "texPath": "Things/Item/Resource/Steel",
+    "graphicClass": "Graphic_StackCount",
+    "from": "ThingDef:SteelBase",
+    "depth": 1
+  }
+}
+```
+
+- `texPath` / `graphicClass` / `uiIconPath`：该 Def **自己写的**值（没有则为 `null`）；
+- `own`：是否自带 `texPath`；
+- `effective`：沿 `ParentName` 链找到的第一个有图祖先（`from: "self"` 表示自己），供 UI 直接取图；
+- 无静态贴图的 Def（如动物走 PawnRenderTree、抽象模板）`effective` 为 `null`，UI 回落到占位图 `assets/placeholder.jpg`。
 
 ## ParentName 解析规则
 
@@ -189,9 +216,10 @@ python scripts/extract_defs.py --game "<RimWorld 根目录>" --check  # 确认�
 | 含 ParentName | 4554（全部在扫描范围内解析成功） |
 | 翻译条目 | 39,010（目录 514 文件 + tar 1470 文件） |
 | 中文 label / title | 6493 / 845 |
+| 贴图（自有/继承/无图） | 1796 / 249 / 11959 |
 | XML 解析错误 | 0 |
-| 输出体积 | 紧凑 6.0 MB / 缩进 8.3 MB |
-| 提取耗时 | 约 1.8 s |
+| 输出体积 | 紧凑 6.5 MB / 缩进 9.0 MB |
+| 提取耗时 | 约 1.9 s |
 
 ## 生成数据不入库
 

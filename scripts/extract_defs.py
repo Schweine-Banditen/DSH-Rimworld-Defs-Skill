@@ -30,7 +30,7 @@ from lxml import etree
 
 # 输出 JSON 的结构版本。字段含义变化（不是新增字段）时递增，
 # Skill 侧据此判断能否读取。
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # 默认采集的 DefInjected 语言目录名（RimWorld 的语言目录带中文后缀）。
 DEFAULT_LANGUAGE = "ChineseSimplified (简体中文)"
@@ -299,7 +299,27 @@ def extract_def(
     conditionals = conditional_children(element)
     if conditionals:
         record["conditionalFields"] = conditionals
+    graphic = parse_graphic(element)
+    if graphic:
+        record["graphic"] = graphic
     return record
+
+
+def parse_graphic(element: etree._Element) -> dict[str, Any] | None:
+    """读取 ``<graphicData>`` 的 texPath / graphicClass，以及独立的 ``uiIconPath``。
+
+    这里只记录该 Def **自己写的**内容；父级继承的解析在 ``resolve_graphics``
+    里完成。三者都没有时返回 None，避免给无关 Def 塞空对象。
+    """
+    graphic_data = element.find("graphicData")
+    tex_path = text_of_child(graphic_data, "texPath") if graphic_data is not None else None
+    graphic_class = (
+        text_of_child(graphic_data, "graphicClass") if graphic_data is not None else None
+    )
+    ui_icon_path = text_of_child(element, "uiIconPath")
+    if not (tex_path or graphic_class or ui_icon_path):
+        return None
+    return {"texPath": tex_path, "graphicClass": graphic_class, "uiIconPath": ui_icon_path}
 
 
 def canonicalize_def_types(defs: list[dict[str, Any]]) -> dict[str, str]:
@@ -716,6 +736,80 @@ def resolve_parents(defs: list[dict[str, Any]]) -> dict[str, Any]:
     return stats
 
 
+def resolve_graphics(defs: list[dict[str, Any]]) -> dict[str, int]:
+    """解析「有效贴图」：自己没写 texPath 时沿 ParentName 链找第一个有图的祖先。
+
+    与字段合并不同，这里只**指向**祖先的 texPath，不复制其他字段；结果写在
+    ``graphic.effective`` 里，并标注来源与层数，供 UI 直接取图。
+    """
+    index: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for record in defs:
+        identity = record.get("defName") or record.get("Name")
+        if identity:
+            index[(record["defType"], identity, record["source"])] = record
+
+    stats = {"own": 0, "inherited": 0, "noGraphic": 0}
+    for record in defs:
+        graphic = record.get("graphic")
+        tex_path = graphic.get("texPath") if graphic else None
+        if tex_path:
+            graphic["own"] = True
+            graphic["effective"] = {
+                "texPath": tex_path,
+                "graphicClass": graphic.get("graphicClass"),
+                "from": "self",
+                "depth": 0,
+            }
+            stats["own"] += 1
+            continue
+
+        visited: set[tuple[str, str, str]] = set()
+        current = record
+        depth = 0
+        found = None
+        while current and current.get("ParentName") and depth < 32:
+            key = (
+                current.get("parentDefType") or "",
+                current.get("parentDefName") or "",
+                current.get("parentSource") or "",
+            )
+            if key in visited:
+                break
+            visited.add(key)
+            parent = index.get(key)
+            if parent is None:
+                break
+            depth += 1
+            parent_graphic = parent.get("graphic") or {}
+            if parent_graphic.get("texPath"):
+                found = (parent, depth)
+                break
+            current = parent
+
+        if found is not None:
+            parent, depth = found
+            parent_graphic = parent["graphic"]
+            if graphic is None:
+                graphic = {"texPath": None, "graphicClass": None, "uiIconPath": None}
+                record["graphic"] = graphic
+            identity = parent.get("defName") or parent.get("Name")
+            graphic["own"] = False
+            graphic["effective"] = {
+                "texPath": parent_graphic["texPath"],
+                "graphicClass": parent_graphic.get("graphicClass"),
+                "from": f'{parent["defType"]}:{identity}',
+                "depth": depth,
+            }
+            stats["inherited"] += 1
+        else:
+            if graphic is not None:
+                graphic["own"] = bool(graphic.get("texPath"))
+                graphic["effective"] = None
+            else:
+                stats["noGraphic"] += 1
+    return stats
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
@@ -757,6 +851,7 @@ def main(argv: list[str] | None = None) -> int:
         translation_stats = attach_translations(defs, translations)
 
     stats = resolve_parents(defs)
+    graphic_stats = resolve_graphics(defs)
 
     # 稳定排序：实际扫描顺序（Core 优先，其后新 DLC）-> defType -> defName/Name
     order = {source["name"]: i for i, source in enumerate(sources)}
@@ -824,6 +919,10 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"父级已解析: {stats['resolved']}（其中跨 defType: {stats['cross_type']}，"
         f"多候选: {stats['ambiguous']}），未解析: {stats['unresolved']}"
+    )
+    print(
+        f"贴图: 自有 texPath {graphic_stats['own']}，继承祖先 {graphic_stats['inherited']}，"
+        f"无图 {graphic_stats['noGraphic']}"
     )
     for reason, count in sorted(stats["unresolved_by_reason"].items()):
         print(f"  - 未解析原因 {reason}: {count}")
