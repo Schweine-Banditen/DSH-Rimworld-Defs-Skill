@@ -47,15 +47,45 @@ window.__ModuleLoader__.load({
       title: { fontSize: 16, fontWeight: 600 },
       status: { fontSize: 11, padding: '2px 8px', borderRadius: 999 },
       meta: { color: 'var(--dsw-alias-label-secondary)', fontSize: 12 },
-      search: {
-        marginLeft: 'auto',
-        width: 300,
-        padding: '7px 10px',
-        borderRadius: 8,
+      searchWrap: { display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0, position: 'relative' },
+      searchField: {
+        flex: 1,
+        minWidth: 0,
+        padding: '6px 24px 6px 9px',
+        borderRadius: 7,
         border: '1px solid var(--dsw-alias-border-l2)',
-        background: 'var(--dsw-alias-bg-layer-1)',
+        background: 'var(--dsw-alias-bg-layer-2)',
         color: 'var(--dsw-alias-label-primary)',
         outline: 'none',
+        fontSize: 12,
+      },
+      clearBtn: {
+        position: 'absolute',
+        right: 4,
+        top: '50%',
+        transform: 'translateY(-50%)',
+        border: 'none',
+        background: 'transparent',
+        color: 'var(--dsw-alias-label-secondary)',
+        cursor: 'pointer',
+        fontSize: 15,
+        lineHeight: 1,
+        padding: '2px 4px',
+      },
+      collapseBtn: {
+        border: '1px solid var(--dsw-alias-border-l2)',
+        background: 'transparent',
+        color: 'var(--dsw-alias-label-secondary)',
+        borderRadius: 6,
+        width: 26,
+        height: 26,
+        fontSize: 13,
+        lineHeight: 1,
+        cursor: 'pointer',
+        flex: '0 0 auto',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
       },
       body: { display: 'flex', flex: 1, minHeight: 0 },
       left: {
@@ -66,12 +96,14 @@ window.__ModuleLoader__.load({
         minHeight: 0,
       },
       leftHeader: {
-        padding: '8px 12px',
-        fontSize: 11,
-        color: 'var(--dsw-alias-label-secondary)',
+        padding: '8px 10px',
         borderBottom: '1px solid var(--dsw-alias-border-l1)',
         display: 'flex',
-        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: 8,
+        flex: '0 0 auto',
+        background: 'var(--dsw-alias-bg-base)',
+        zIndex: 2,
       },
       tree: { flex: 1, overflow: 'auto', padding: '6px 0' },
       row: {
@@ -123,9 +155,9 @@ window.__ModuleLoader__.load({
       },
       branchTitle: { fontSize: 11.5, fontWeight: 600, color: 'var(--dsw-alias-label-secondary)', marginBottom: 8, letterSpacing: '.02em' },
       sectionTitle: { fontSize: 11.5, fontWeight: 600, color: 'var(--dsw-alias-label-secondary)', marginBottom: 6 },
-      attrRow: { display: 'flex', gap: 10, padding: '4px 0', borderBottom: '1px solid var(--dsw-alias-border-l1)', fontSize: 12.5 },
-      attrKey: { width: 118, flex: '0 0 auto', color: 'var(--dsw-alias-label-secondary)' },
-      attrVal: { wordBreak: 'break-word', minWidth: 0 },
+      attrRow: { display: 'flex', flexDirection: 'column', gap: 2, padding: '5px 0', borderBottom: '1px solid var(--dsw-alias-border-l1)' },
+      attrKey: { color: 'var(--dsw-alias-label-secondary)', fontSize: 11, wordBreak: 'break-word' },
+      attrVal: { wordBreak: 'break-word', minWidth: 0, fontSize: 12.5 },
       chainRow: { padding: '3px 0', fontSize: 12.5, animation: 'rwRowIn .25s ease-out both' },
       warn: {
         marginTop: 14,
@@ -509,6 +541,12 @@ window.__ModuleLoader__.load({
         setExpanded((prev) => ({ ...prev, [key]: !prev[key] }))
       }, [])
 
+      const collapseAll = useCallback(() => setExpanded({}), [])
+      const clearSearch = useCallback(() => {
+        setQuery('')
+        setResults([])
+      }, [])
+
       const openTreePath = useCallback((sourceName, groupKey) => {
         setExpanded((prev) => ({ ...prev, [sourceName]: true, [`${sourceName}::${groupKey}`]: true }))
       }, [])
@@ -522,7 +560,6 @@ window.__ModuleLoader__.load({
           const rec = hit.record
           setSelected({ defName: rec.defName || rec.Name, defType: rec.defType, source: rec.source })
           openTreePath(rec.source, hit.group)
-          setQuery('')
         },
         [openTreePath],
       )
@@ -539,13 +576,6 @@ window.__ModuleLoader__.load({
           h('span', { style: styles.title }, 'RimWorld Defs'),
           h(StatusChip, { notice: meta && meta.notice }),
           h('span', { style: styles.meta }, meta ? `${meta.defCount} Defs · 数据 ${meta.gameVersion || '未知'}` : '加载中…'),
-          h('input', {
-            style: styles.search,
-            placeholder: '搜索 defName / 英文名 / 中文名',
-            value: query,
-            onChange: (event) => setQuery(event.target.value),
-            'aria-label': '搜索 Def',
-          }),
         ),
         meta && meta.notice && meta.notice.status === 'stale'
           ? h('div', { style: { ...styles.warn, margin: '10px 18px 0' } }, meta.notice.message)
@@ -560,8 +590,29 @@ window.__ModuleLoader__.load({
             h(
               'div',
               { style: styles.leftHeader },
-              h('span', null, query.trim() ? `搜索：${query.trim()}` : '来源 / 分类'),
-              h('span', null, sources ? `${sources.length} 个来源` : ''),
+              h(
+                'button',
+                { style: styles.collapseBtn, onClick: collapseAll, title: '收起所有分类', 'aria-label': '收起所有分类' },
+                '⤒',
+              ),
+              h(
+                'div',
+                { style: styles.searchWrap },
+                h('input', {
+                  style: styles.searchField,
+                  placeholder: '搜索 defName / 中英文名',
+                  value: query,
+                  onChange: (event) => setQuery(event.target.value),
+                  'aria-label': '搜索 Def',
+                }),
+                query.trim()
+                  ? h(
+                      'button',
+                      { style: styles.clearBtn, onClick: clearSearch, title: '清除筛选', 'aria-label': '清除筛选' },
+                      '×',
+                    )
+                  : null,
+              ),
             ),
             query.trim()
               ? h(
