@@ -36,7 +36,10 @@ JSON 记录的是 **Def XML 的模板层面信息**（每个 `Def` 节点写了�
 ├── SKILL.md                  # DSH Skill 入口（frontmatter: name + description）
 ├── README.md                 # 本文件
 ├── scripts/
-│   └── extract_defs.py       # 提取脚本（唯一入口）
+│   ├── extract_defs.py       # 提取脚本（唯一入口）
+│   └── verify_defs.py        # 抽样校验（测试专用，不参与运行时）
+├── docs/
+│   └── verify-testing.md     # 校验工具使用说明
 └── data/                     # 生成的 JSON（.gitignore 忽略）
     ├── .gitkeep
     └── .gitignore

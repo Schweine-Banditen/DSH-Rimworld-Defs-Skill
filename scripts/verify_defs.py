@@ -1,0 +1,226 @@
+#!/usr/bin/env python3
+"""独立校验：从生成的 JSON 抽样 N 条 Def，回到游戏原始 XML / DefInjected 逐字段比对。
+
+不 import 提取脚本，全部独立解析，避免“用同一份代码验证自己”。
+
+用法::
+
+    python verify_defs.py --json <rimworld-defs.json> --game <RimWorld 根目录> [--samples 100] [--seed 20261106]
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import random
+import sys
+import tarfile
+from pathlib import Path, PurePosixPath
+
+from lxml import etree
+
+DEFAULT_LANGUAGE = "ChineseSimplified (简体中文)"
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="verify_defs", description="抽样校验 JSON 与原始 XML")
+    parser.add_argument("--json", required=True, metavar="FILE")
+    parser.add_argument("--game", required=True, metavar="DIR")
+    parser.add_argument("--samples", type=int, default=100)
+    parser.add_argument("--seed", type=int, default=20261106)
+    parser.add_argument("--language", default=DEFAULT_LANGUAGE)
+    return parser.parse_args(argv)
+
+
+def bool_attr(element: etree._Element, name: str) -> bool | None:
+    raw = element.get(name)
+    if raw is None:
+        return None
+    value = raw.strip().lower()
+    if value in ("true", "1", "yes"):
+        return True
+    if value in ("false", "0", "no"):
+        return False
+    return None
+
+
+def child_text(element: etree._Element, name: str) -> str | None:
+    child = element.find(name)
+    if child is None or child.text is None:
+        return None
+    text = child.text.strip()
+    return text or None
+
+
+def child_list(element: etree._Element, name: str) -> list[str]:
+    container = element.find(name)
+    if container is None:
+        return []
+    return [li.text.strip() for li in container.findall("li") if li.text and li.text.strip()]
+
+
+def iter_defs(root: etree._Element):
+    for child in root:
+        if not isinstance(child.tag, str):
+            continue
+        if child.find("defName") is not None or child.get("Name") is not None:
+            yield child
+
+
+def find_element(tree: etree._Element, record: dict) -> etree._Element | None:
+    """按 defType + defName/Name + Abstract 在原始 XML 中定位同一条 def。"""
+    def_name = record.get("defName")
+    name_attr = record.get("Name")
+    def_type = (record.get("defType") or "").lower()
+    is_abstract = record.get("Abstract") is True
+    for element in iter_defs(tree):
+        if element.tag.lower() != def_type:
+            continue
+        element_abstract = bool_attr(element, "Abstract") is True
+        if element_abstract != is_abstract:
+            continue
+        if def_name:
+            if child_text(element, "defName") != def_name:
+                continue
+        else:
+            if child_text(element, "defName") is not None:
+                continue
+        if name_attr and element.get("Name") != name_attr:
+            continue
+        return element
+    return None
+
+
+def load_translations(game_root: Path, sources: list[str], language: str) -> dict[tuple[str, str], dict[str, str]]:
+    """独立读取 DefInjected（目录 + tar），只收 label / title。"""
+    index: dict[tuple[str, str], dict[str, str]] = {}
+
+    def absorb(root: etree._Element, def_type: str) -> None:
+        for element in root:
+            if not isinstance(element.tag, str) or "." not in element.tag:
+                continue
+            name, field = element.tag.split(".", 1)
+            if field not in ("label", "title"):
+                continue
+            text = (element.text or "").strip()
+            if text:
+                index.setdefault((def_type, name), {}).setdefault(field, text)
+
+    for source in sources:
+        lang_root = game_root / "Data" / source / "Languages" / language
+        injected = lang_root / "DefInjected"
+        if injected.is_dir():
+            for xml_path in sorted(injected.rglob("*.xml")):
+                relative = xml_path.relative_to(injected)
+                if len(relative.parts) < 2:
+                    continue
+                try:
+                    absorb(etree.parse(str(xml_path)).getroot(), relative.parts[0].lower())
+                except etree.XMLSyntaxError:
+                    continue
+
+        tar_path = lang_root.parent / f"{language}.tar"
+        if tar_path.is_file():
+            try:
+                with tarfile.open(tar_path) as archive:
+                    for member in archive.getmembers():
+                        if not member.isfile() or not member.name.endswith(".xml"):
+                            continue
+                        parts = PurePosixPath(member.name).parts
+                        if len(parts) < 3 or parts[0] != "DefInjected":
+                            continue
+                        handle = archive.extractfile(member)
+                        if handle is None:
+                            continue
+                        try:
+                            absorb(etree.fromstring(handle.read()), parts[1].lower())
+                        except etree.XMLSyntaxError:
+                            continue
+            except (tarfile.TarError, OSError):
+                continue
+    return index
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    game_root = Path(args.game).expanduser().resolve()
+    data = json.loads(Path(args.json).read_text(encoding="utf-8-sig"))
+    defs = [d for d in data["defs"] if d.get("defName") or d.get("Name")]
+    rng = random.Random(args.seed)
+    sample = rng.sample(defs, min(args.samples, len(defs)))
+
+    sources = sorted({d["source"] for d in defs})
+    translations = load_translations(game_root, sources, args.language)
+
+    tree_cache: dict[str, etree._Element] = {}
+    mismatches: list[dict] = []
+    checked_fields = 0
+
+    for record in sample:
+        source_path = record["sourcePath"]
+        if source_path not in tree_cache:
+            tree_cache[source_path] = etree.parse(str(game_root / source_path)).getroot()
+        element = find_element(tree_cache[source_path], record)
+        if element is None:
+            mismatches.append({"def": f'{record["defType"]}:{record.get("defName") or record.get("Name")}', "field": "*", "json": "present", "xml": "element not found"})
+            continue
+
+        expect = {
+            "defType": element.tag,
+            "defName": child_text(element, "defName"),
+            "Name": element.get("Name"),
+            "label": child_text(element, "label"),
+            "ParentName": element.get("ParentName"),
+            "Abstract": bool_attr(element, "Abstract"),
+            "Class": element.get("Class"),
+            "MayRequire": element.get("MayRequire"),
+            "MayRequireAnyOf": element.get("MayRequireAnyOf"),
+            "category": child_text(element, "category"),
+            "thingCategories": child_list(element, "thingCategories"),
+        }
+        for field, expected in expect.items():
+            checked_fields += 1
+            actual = record.get(field)
+            if field == "defType":
+                actual_cmp, expected_cmp = (actual or "").lower(), expected.lower()
+            else:
+                actual_cmp, expected_cmp = actual, expected
+            if actual_cmp != expected_cmp:
+                mismatches.append(
+                    {
+                        "def": f'{record["defType"]}:{record.get("defName") or record.get("Name")}',
+                        "field": field,
+                        "json": actual,
+                        "xml": expected,
+                        "sourcePath": source_path,
+                    }
+                )
+
+        # source / sourcePath 一致性
+        checked_fields += 2
+        expected_source = Path(source_path).parts[1]
+        if record.get("source") != expected_source:
+            mismatches.append({"def": f'{record["defType"]}:{record.get("defName")}', "field": "source", "json": record.get("source"), "xml": expected_source})
+        if not (game_root / source_path).is_file():
+            mismatches.append({"def": record.get("defName"), "field": "sourcePath", "json": source_path, "xml": "file missing"})
+
+        # 中文标签
+        if record.get("defName"):
+            translated = translations.get((record["defType"].lower(), record["defName"]), {})
+            checked_fields += 2
+            if translated.get("label") != record.get("labelZh"):
+                mismatches.append({"def": f'{record["defType"]}:{record["defName"]}', "field": "labelZh", "json": record.get("labelZh"), "xml": translated.get("label")})
+            if translated.get("title") != record.get("titleZh"):
+                mismatches.append({"def": f'{record["defType"]}:{record["defName"]}', "field": "titleZh", "json": record.get("titleZh"), "xml": translated.get("title")})
+
+    print(f"样本: {len(sample)} 条（seed={args.seed}），字段断言: {checked_fields} 次")
+    print(f"不一致: {len(mismatches)} 处")
+    for item in mismatches[:20]:
+        print(f"  - {item['def']} [{item['field']}] json={item['json']!r} xml={item['xml']!r}")
+    if len(mismatches) > 20:
+        print(f"  ... 其余 {len(mismatches) - 20} 处省略")
+    return 0 if not mismatches else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
