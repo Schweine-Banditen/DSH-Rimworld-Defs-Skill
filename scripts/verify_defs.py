@@ -141,6 +141,97 @@ def load_translations(game_root: Path, sources: list[str], language: str) -> dic
     return index
 
 
+def build_graphic_index(game_root: Path) -> dict[str, list[dict]]:
+    """独立解析全部 Def XML，按**标识**建立「自有贴图信息」索引。
+
+    继承查找不能按 defType 限定：真实数据里存在跨类型继承（FleckDef→ThingDef），
+    与提取脚本一致，按标识全局查找、再用优先级挑候选。
+    """
+    index: dict[str, list[dict]] = {}
+    for xml_path in sorted((game_root / "Data").glob("*/Defs/**/*.xml")):
+        parts = xml_path.relative_to(game_root).parts
+        if len(parts) < 2:
+            continue
+        source = parts[1]
+        try:
+            root = etree.parse(str(xml_path)).getroot()
+        except (etree.XMLSyntaxError, OSError):
+            continue
+        for element in iter_defs(root):
+            def_name = child_text(element, "defName")
+            name_attr = element.get("Name")
+            identity = def_name or name_attr
+            if not identity:
+                continue
+            graphic_data = element.find("graphicData")
+            tex_path = child_text(graphic_data, "texPath") if graphic_data is not None else None
+            graphic_class = child_text(graphic_data, "graphicClass") if graphic_data is not None else None
+            entry = {
+                "tag": element.tag,
+                "identity": identity,
+                "source": source,
+                "texPath": tex_path,
+                "graphicClass": graphic_class,
+                "parent": element.get("ParentName"),
+            }
+            # ParentName 可以指向 defName，也可以指向抽象模板的 Name。
+            for key in {def_name, name_attr}:
+                if key:
+                    index.setdefault(key, []).append(entry)
+    return index
+
+
+def pick_parent(candidates: list[dict], child_tag: str, child_source: str) -> dict | None:
+    """与提取脚本一致的候选优先级：同类型同来源 → 同类型 Core → ……"""
+    if not candidates:
+        return None
+
+    def rank(item: dict) -> tuple[int, int]:
+        same_type = item["tag"].lower() == child_tag.lower()
+        same_source = item["source"] == child_source
+        is_core = item["source"] == "Core"
+        if same_type and same_source:
+            return (0, 0)
+        if same_type and is_core:
+            return (1, 0)
+        if same_type:
+            return (2, 0)
+        if same_source:
+            return (3, 0)
+        if is_core:
+            return (4, 0)
+        return (5, 0)
+
+    return sorted(candidates, key=rank)[0]
+
+
+def expected_effective(record: dict, own: dict | None, index: dict) -> dict | None:
+    """用原始 XML 索引独立复算 effective：沿 ParentName 链找第一个有 texPath 的 def。"""
+    if own and own.get("texPath"):
+        return {"texPath": own["texPath"], "from": "self", "depth": 0}
+
+    current = {
+        "tag": record["defType"],
+        "source": record["source"],
+        "parent": record.get("ParentName"),
+    }
+    depth = 0
+    while current.get("parent") and depth < 32:
+        candidates = index.get(current["parent"], [])
+        picked = pick_parent(candidates, current["tag"], current["source"])
+        if picked is None:
+            return None
+        depth += 1
+        if picked.get("texPath"):
+            return {
+                "texPath": picked["texPath"],
+                "from": f'{picked["tag"]}:{picked["identity"]}',
+                "depth": depth,
+            }
+        current = {"tag": picked["tag"], "source": picked["source"], "parent": picked.get("parent")}
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     game_root = Path(args.game).expanduser().resolve()
@@ -151,6 +242,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sources = sorted({d["source"] for d in defs})
     translations = load_translations(game_root, sources, args.language)
+    graphic_index = build_graphic_index(game_root)
 
     tree_cache: dict[str, etree._Element] = {}
     mismatches: list[dict] = []
@@ -212,6 +304,35 @@ def main(argv: list[str] | None = None) -> int:
                 mismatches.append({"def": f'{record["defType"]}:{record["defName"]}', "field": "labelZh", "json": record.get("labelZh"), "xml": translated.get("label")})
             if translated.get("title") != record.get("titleZh"):
                 mismatches.append({"def": f'{record["defType"]}:{record["defName"]}', "field": "titleZh", "json": record.get("titleZh"), "xml": translated.get("title")})
+
+        # 贴图：自有字段 + 独立复算 effective
+        graphic_data = element.find("graphicData")
+        own = {
+            "texPath": child_text(graphic_data, "texPath") if graphic_data is not None else None,
+            "graphicClass": child_text(graphic_data, "graphicClass") if graphic_data is not None else None,
+            "uiIconPath": child_text(element, "uiIconPath"),
+        }
+        has_any_own = any(own.values())
+        json_graphic = record.get("graphic") or {}
+        for field in ("texPath", "graphicClass", "uiIconPath"):
+            checked_fields += 1
+            if own[field] != json_graphic.get(field):
+                mismatches.append({"def": f'{record["defType"]}:{record.get("defName")}', "field": f"graphic.{field}", "json": json_graphic.get(field), "xml": own[field]})
+
+        expected_eff = expected_effective(record, own, graphic_index)
+        actual_eff = json_graphic.get("effective")
+        checked_fields += 1
+        if expected_eff is None:
+            if actual_eff is not None:
+                mismatches.append({"def": f'{record["defType"]}:{record.get("defName")}', "field": "graphic.effective", "json": actual_eff, "xml": None})
+        else:
+            if actual_eff is None:
+                mismatches.append({"def": f'{record["defType"]}:{record.get("defName")}', "field": "graphic.effective", "json": None, "xml": expected_eff})
+            else:
+                for field in ("texPath", "from", "depth"):
+                    checked_fields += 1
+                    if actual_eff.get(field) != expected_eff.get(field):
+                        mismatches.append({"def": f'{record["defType"]}:{record.get("defName")}', "field": f"graphic.effective.{field}", "json": actual_eff.get(field), "xml": expected_eff.get(field)})
 
     print(f"样本: {len(sample)} 条（seed={args.seed}），字段断言: {checked_fields} 次")
     print(f"不一致: {len(mismatches)} 处")

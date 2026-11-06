@@ -32,10 +32,17 @@ python scripts/verify_defs.py --json data/rimworld-defs.json --game "<RimWorld �
 - `MayRequire`、`MayRequireAnyOf`、`category`、`thingCategories`
 - `source`（由路径反推）、`sourcePath`（文件存在性）
 - `labelZh`、`titleZh`（回查 DefInjected 目录与 DLC 的 `.tar`）
+- `graphic.texPath` / `graphic.graphicClass` / `graphic.uiIconPath`（自有值）
+- `graphic.effective.texPath` / `.from` / `.depth`（独立解析全部 XML 后复算父链）
 
 ## 定位规则（容易踩的坑）
 
 游戏里 `defName` 只在**同类型**内唯一：`Otter` 同时是 `ThingDef` 和 `PawnKindDef`，`DarkRed` 同时是 `ColorDef` 和 `IdeoColorDef`。因此定位元素必须同时匹配 **defType + defName/Name + Abstract**；只按 defName 会取到错误元素，产生假警报。
+
+父链解析还有两条真实规则：
+
+- `ParentName` 既可以指向具体 def 的 `defName`，也可以指向抽象模板的 `Name`（例如 `Mote_ForceJobMaintained` 的父级写作 `ForceJob`，对应某条同时有 `Name` 与 `defName` 的 def）；
+- 继承可以跨 defType（`FleckDef → ThingDef`），因此查找父级不能按类型限定。
 
 ## 已知限制
 
