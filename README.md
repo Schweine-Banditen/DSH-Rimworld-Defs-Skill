@@ -2,12 +2,14 @@
 
 RimWorld（环世界）XML 定义的**静态参考工具**：由 Python 脚本把游戏 `Defs/` 解析成结构化 JSON，再由 DSH Skill 提供查询工具。
 
-> 当前状态：**提取脚本已完成**（`scripts/extract_defs.py`，含中文标签采集）。Skill 查询层尚未实现。
+> 当前状态：提取脚本、查询层、DSH 面板（文件树 + 详情 + 贴图/染色/XML/翻译）均已实现。
+>
+> 维护与交接：见 [AGENTS.md](AGENTS.md)；完整使用手册见 [docs/manual.md](docs/manual.md)。
 
 ## 项目构成
 
 1. **提取脚本**（`scripts/extract_defs.py`，Python + lxml）：扫描游戏 `Data/*/Defs` 与 `Languages/*/DefInjected`，产出 `data/rimworld-defs.json`。
-2. **DSH Skill**（本仓库 `SKILL.md`）：加载该 JSON，提供四个查询工具（待实现）。
+2. **DSH Skill**（本仓库 `SKILL.md` + `ui/` 面板）：查询层已实现；四个 DSH 工具的接入层待补。
 
 ## 核心边界：静态参考 ≠ 运行时真相
 
@@ -33,6 +35,7 @@ JSON 记录的是 **Def XML 的模板层面信息**（每个 `Def` 节点写了�
 
 ```text
 .
+├── AGENTS.md                 # 后续会话的项目规则（必读）
 ├── SKILL.md                  # DSH Skill 入口（frontmatter: name + description）
 ├── README.md                 # 本文件
 ├── scripts/
@@ -41,6 +44,7 @@ JSON 记录的是 **Def XML 的模板层面信息**（每个 `Def` 节点写了�
 │   ├── render_icon.py        # 从 Assets.zip 解码 DDS 贴图为 PNG
 │   └── verify_defs.py        # 抽样校验（测试专用，不参与运行时）
 ├── docs/
+│   ├── manual.md             # 使用与维护手册
 │   ├── query-layer.md        # 查询层 API 与语义
 │   └── verify-testing.md     # 校验工具使用说明
 ├── assets/
