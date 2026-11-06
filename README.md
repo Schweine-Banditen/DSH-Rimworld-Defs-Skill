@@ -37,8 +37,10 @@ JSON 记录的是 **Def XML 的模板层面信息**（每个 `Def` 节点写了�
 ├── README.md                 # 本文件
 ├── scripts/
 │   ├── extract_defs.py       # 提取脚本（唯一入口）
+│   ├── query_defs.py         # 查询层（只读，可 import / CLI）
 │   └── verify_defs.py        # 抽样校验（测试专用，不参与运行时）
 ├── docs/
+│   ├── query-layer.md        # 查询层 API 与语义
 │   └── verify-testing.md     # 校验工具使用说明
 ├── assets/
 │   └── placeholder.jpg       # 贴图缺失时的占位图（UI 阶段使用）
@@ -83,6 +85,18 @@ python scripts/extract_defs.py --game "<RimWorld 根目录>" --check  # 确认�
 - 写入采用「临时文件 + 原子替换」，中途失败不会留下半个 JSON；
 - 重建时会读一次旧 JSON 生成 `changes`，随后旧文件被覆盖（不保留历史数据）；
 - `--check` 只做廉价版本比对（不扫描 XML）；若怀疑 XML 被改但版本号未变，直接重跑即可。
+
+## 查询层
+
+```bash
+python scripts/query_defs.py info
+python scripts/query_defs.py search-def Steel
+python scripts/query_defs.py search-label 钢 --limit 10
+python scripts/query_defs.py list-source Odyssey --limit 20
+python scripts/query_defs.py list-category --category Item --thing-categories ResourcesRaw --def-type ThingDef
+```
+
+只读：不修改数据、不触发重建。四个查询与版本提示的语义见 [docs/query-layer.md](docs/query-layer.md)。
 
 ## 输出结构
 
