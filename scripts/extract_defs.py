@@ -30,7 +30,7 @@ from lxml import etree
 
 # 输出 JSON 的结构版本。字段含义变化（不是新增字段）时递增，
 # Skill 侧据此判断能否读取。
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # 默认采集的 DefInjected 语言目录名（RimWorld 的语言目录带中文后缀）。
 DEFAULT_LANGUAGE = "ChineseSimplified (简体中文)"
@@ -302,6 +302,7 @@ def extract_def(
     graphic = parse_graphic(element)
     if graphic:
         record["graphic"] = graphic
+    record["_fields"] = extract_own_fields(element)
     return record
 
 
@@ -320,6 +321,108 @@ def parse_graphic(element: etree._Element) -> dict[str, Any] | None:
     if not (tex_path or graphic_class or ui_icon_path):
         return None
     return {"texPath": tex_path, "graphicClass": graphic_class, "uiIconPath": ui_icon_path}
+
+
+# 常用标量字段（物品种类相关），沿父链取第一个出现的值。
+SCALAR_FIELDS: tuple[str, ...] = (
+    "size",
+    "rotatable",
+    "fillPercent",
+    "stackLimit",
+    "costStuffCount",
+    "thingClass",
+    "uiIconScale",
+    "useHitPoints",
+    "selectable",
+)
+
+
+def _scalar_children(element: etree._Element, container_name: str) -> dict[str, str] | None:
+    """读取 ``<container><Key>值</Key></container>`` 形式的标量键值。"""
+    container = element.find(container_name)
+    if container is None:
+        return None
+    values: dict[str, str] = {}
+    for child in container:
+        if not isinstance(child.tag, str) or len(child):
+            continue
+        text = (child.text or "").strip()
+        if text:
+            values[child.tag] = text
+    return values or None
+
+
+def _parse_comps(element: etree._Element) -> list[dict[str, Any]] | None:
+    """读取 ``<comps><li Class=...>`` 的类名与标量子属性。"""
+    comps_element = element.find("comps")
+    if comps_element is None:
+        return None
+    entries: list[dict[str, Any]] = []
+    for li in comps_element.findall("li"):
+        class_name = li.get("Class") or text_of_child(li, "compClass")
+        props: dict[str, str] = {}
+        for child in li:
+            if not isinstance(child.tag, str) or child.tag == "compClass" or len(child):
+                continue
+            text = (child.text or "").strip()
+            if text:
+                props[child.tag] = text
+        if class_name or props:
+            entries.append({"class": class_name, "props": props})
+    return entries or None
+
+
+def _parse_building(element: etree._Element) -> dict[str, Any] | None:
+    """读取 ``<building>`` 中的存储设置（标签、优先级、过滤类别）。"""
+    building = element.find("building")
+    if building is None:
+        return None
+    result: dict[str, Any] = {}
+    storage_tag = text_of_child(building, "storageGroupTag")
+    if storage_tag:
+        result["storageGroupTag"] = storage_tag
+    for key in ("defaultStorageSettings", "fixedStorageSettings"):
+        node = building.find(key)
+        if node is None:
+            continue
+        settings: dict[str, Any] = {}
+        priority = text_of_child(node, "priority")
+        if priority:
+            settings["priority"] = priority
+        filter_element = node.find("filter")
+        if filter_element is not None:
+            categories = list_of_children_text(filter_element, "categories")
+            if categories:
+                settings["categories"] = categories
+            disallowed = list_of_children_text(filter_element, "disallowedCategories")
+            if disallowed:
+                settings["disallowedCategories"] = disallowed
+            disallowed_defs = list_of_children_text(filter_element, "disallowedThingDefs")
+            if disallowed_defs:
+                settings["disallowedThingDefs"] = disallowed_defs
+        if settings:
+            result[key] = settings
+    return result or None
+
+
+def extract_own_fields(element: etree._Element) -> dict[str, Any]:
+    """抽取该 Def 自己写的常用字段；继承解析在 ``resolve_fields`` 里完成。"""
+    scalars: dict[str, str] = {}
+    for name in SCALAR_FIELDS:
+        value = text_of_child(element, name)
+        if value:
+            scalars[name] = value
+    own: dict[str, Any] = {"scalars": scalars}
+    stat_bases = _scalar_children(element, "statBases")
+    if stat_bases:
+        own["statBases"] = stat_bases
+    comps = _parse_comps(element)
+    if comps:
+        own["comps"] = comps
+    building = _parse_building(element)
+    if building:
+        own["building"] = building
+    return own
 
 
 def canonicalize_def_types(defs: list[dict[str, Any]]) -> dict[str, str]:
@@ -810,6 +913,114 @@ def resolve_graphics(defs: list[dict[str, Any]]) -> dict[str, int]:
     return stats
 
 
+def resolve_fields(defs: list[dict[str, Any]]) -> dict[str, int]:
+    """整理常用字段：标量沿父链取第一个值，statBases 合并，comps/building 取最近来源。
+
+    这不是运行时字段合并：结果只用于展示「这个 Def 的模板级属性大概是什么」，
+    每个值都标注来源（self 或祖先标识）。
+    """
+    by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for record in defs:
+        identity = record.get("defName") or record.get("Name")
+        if identity:
+            by_key[(record["defType"], identity, record["source"])] = record
+
+    own_fields = {id(record): (record.pop("_fields", None) or {}) for record in defs}
+
+    def label(record: dict[str, Any]) -> str:
+        return f'{record["defType"]}:{record.get("defName") or record.get("Name")}'
+
+    def chain(record: dict[str, Any]) -> list[dict[str, Any]]:
+        hops = [record]
+        current = record
+        seen: set[tuple[str, str, str]] = set()
+        while current.get("ParentName") and len(hops) < 32:
+            key = (
+                current.get("parentDefType") or "",
+                current.get("parentDefName") or "",
+                current.get("parentSource") or "",
+            )
+            if key in seen:
+                break
+            seen.add(key)
+            parent = by_key.get(key)
+            if parent is None:
+                break
+            hops.append(parent)
+            current = parent
+        return hops
+
+    stats = {"withFields": 0, "withInherited": 0}
+    for record in defs:
+        hops = chain(record)
+        result: dict[str, Any] = {}
+
+        scalars: dict[str, Any] = {}
+        for name in SCALAR_FIELDS:
+            for index, ancestor in enumerate(hops):
+                value = own_fields[id(ancestor)].get("scalars", {}).get(name)
+                if value:
+                    scalars[name] = {
+                        "value": value,
+                        "from": "self" if index == 0 else label(ancestor),
+                    }
+                    break
+        if scalars:
+            result["scalars"] = scalars
+
+        merged: dict[str, str] = {}
+        sources: dict[str, str] = {}
+        for ancestor in reversed(hops):
+            values = own_fields[id(ancestor)].get("statBases")
+            if not values:
+                continue
+            origin = "self" if ancestor is record else label(ancestor)
+            for key, value in values.items():
+                merged[key] = value
+                sources[key] = origin
+        if merged:
+            inherited = {key: origin for key, origin in sources.items() if origin != "self"}
+            entry: dict[str, Any] = {
+                "value": merged,
+                "from": "merged" if inherited else "self",
+            }
+            if inherited:
+                entry["inheritedFrom"] = inherited
+            result["statBases"] = entry
+
+        for index, ancestor in enumerate(hops):
+            comps = own_fields[id(ancestor)].get("comps")
+            if comps:
+                result["comps"] = {
+                    "value": comps,
+                    "from": "self" if index == 0 else label(ancestor),
+                }
+                break
+
+        for index, ancestor in enumerate(hops):
+            building = own_fields[id(ancestor)].get("building")
+            if building:
+                result["building"] = {
+                    "value": building,
+                    "from": "self" if index == 0 else label(ancestor),
+                }
+                break
+
+        if result:
+            record["fields"] = result
+            stats["withFields"] += 1
+            has_inherited = any(
+                isinstance(entry, dict) and entry.get("from") not in ("self", "merged")
+                for entry in result.values()
+            ) or any(
+                isinstance(entry, dict) and entry.get("inheritedFrom")
+                for entry in result.values()
+            )
+            if has_inherited:
+                stats["withInherited"] += 1
+    return stats
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
@@ -851,6 +1062,7 @@ def main(argv: list[str] | None = None) -> int:
         translation_stats = attach_translations(defs, translations)
 
     stats = resolve_parents(defs)
+    field_stats = resolve_fields(defs)
     graphic_stats = resolve_graphics(defs)
 
     # 稳定排序：实际扫描顺序（Core 优先，其后新 DLC）-> defType -> defName/Name
@@ -923,6 +1135,9 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"贴图: 自有 texPath {graphic_stats['own']}，继承祖先 {graphic_stats['inherited']}，"
         f"无图 {graphic_stats['noGraphic']}"
+    )
+    print(
+        f"字段: 有属性 {field_stats['withFields']}（其中含继承来源 {field_stats['withInherited']}）"
     )
     for reason, count in sorted(stats["unresolved_by_reason"].items()):
         print(f"  - 未解析原因 {reason}: {count}")

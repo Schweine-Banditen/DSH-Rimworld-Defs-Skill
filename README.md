@@ -38,12 +38,14 @@ JSON 记录的是 **Def XML 的模板层面信息**（每个 `Def` 节点写了�
 ├── scripts/
 │   ├── extract_defs.py       # 提取脚本（唯一入口）
 │   ├── query_defs.py         # 查询层（只读，可 import / CLI）
+│   ├── render_icon.py        # 从 Assets.zip 解码 DDS 贴图为 PNG
 │   └── verify_defs.py        # 抽样校验（测试专用，不参与运行时）
 ├── docs/
 │   ├── query-layer.md        # 查询层 API 与语义
 │   └── verify-testing.md     # 校验工具使用说明
 ├── assets/
-│   └── placeholder.jpg       # 贴图缺失时的占位图（UI 阶段使用）
+│   └── placeholder.jpg       # 贴图缺失时的占位图
+├── ui/                       # DSH 面板 bundle（Host 路由 + Client 面板）
 └── data/                     # 生成的 JSON（.gitignore 忽略）
     ├── .gitkeep
     └── .gitignore
@@ -104,7 +106,7 @@ python scripts/query_defs.py list-category --category Item --thing-categories Re
 
 ```json
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "generatedAt": "...",
   "gameVersion": "1.7.5000 rev1275",
   "gameRoot": "...",
@@ -171,6 +173,7 @@ python scripts/query_defs.py list-category --category Item --thing-categories Re
 | `category` | `<category>` 顶层大类；**语义随 defType 变化**（ThingDef 为 `Item/Building`，StatDef 为 `PawnWork` 等），跨类型混用无意义 |
 | `thingCategories` | `<thingCategories><li>` 细分类列表（可能与 `category` 同时存在） |
 | `graphic` | 贴图引用：`texPath` / `graphicClass` / `uiIconPath`（自有）+ `own` + `effective`（沿父链解析出的有效贴图与来源） |
+| `fields` | 常用属性：`scalars`（size/stackLimit/thingClass…）、`statBases`（沿父链合并，标注继承来源）、`building`（存储组/过滤/优先级）、`comps`（最近来源的组件与标量属性） |
 | `conditionalFields` | 顶层子元素上的字段级条件（如某个字段只在 Odyssey 下生效） |
 | `source` | `Core`/`Royalty`/…，**严格按文件路径判定** |
 | `sourcePath` | 相对游戏根目录的路径（正斜杠） |
@@ -198,6 +201,25 @@ python scripts/query_defs.py list-category --category Item --thing-categories Re
 - `own`：是否自带 `texPath`；
 - `effective`：沿 `ParentName` 链找到的第一个有图祖先（`from: "self"` 表示自己），供 UI 直接取图；
 - 无静态贴图的 Def（如动物走 PawnRenderTree、抽象模板）`effective` 为 `null`，UI 回落到占位图 `assets/placeholder.jpg`。
+
+## 属性字段（fields）
+
+为「物品/建筑有哪些属性」提供静态视图，全部沿父链标注来源：
+
+```json
+"fields": {
+  "scalars": {"size": {"value": "(2,1)", "from": "self"}},
+  "statBases": {"value": {"MaxHitPoints": "100"}, "from": "merged",
+                "inheritedFrom": {"Beauty": "ThingDef:ShelfBase"}},
+  "building": {"value": {"storageGroupTag": "Shelf", "defaultStorageSettings": {"priority": "Preferred", "categories": ["Foods"]}},
+               "from": "ThingDef:StorageShelfBase"},
+  "comps": {"value": [{"class": "CompProperties_Styleable", "props": {}}], "from": "ThingDef:ShelfBase"}
+}
+```
+
+- `statBases` 是**模板级合并**（父先子后），只用于展示；`inheritedFrom` 标出哪些键来自祖先；
+- `building` 提供 `storageGroupTag`、过滤类别与优先级——**具体能存多少格/覆盖范围由 `Building_Storage` 在运行时决定，XML 中没有数字**；
+- `comps` 取最近一个定义处，只收类名与标量属性，不展开嵌套结构。
 
 ## ParentName 解析规则
 
@@ -232,12 +254,30 @@ python scripts/query_defs.py list-category --category Item --thing-categories Re
 | 中文 label / title | 6493 / 845 |
 | 贴图（自有/继承/无图） | 1796 / 249 / 11959 |
 | XML 解析错误 | 0 |
-| 输出体积 | 紧凑 6.5 MB / 缩进 9.0 MB |
-| 提取耗时 | 约 1.9 s |
+| 输出体积 | 紧凑 8.1 MB / 缩进 11.9 MB |
+| 提取耗时 | 约 2.4 s |
 
 ## 生成数据不入库
 
 `data/*.json` 由游戏内容派生，体积大且含 Ludeon 版权内容，默认不提交（`data/.gitignore` 已忽略）。需要分发时在目标机本地生成。
+
+## 可视化面板（ui/）
+
+`ui/` 是一个 DSH bundle：Host 半注册本机路由（`/rimworld-defs/api/*`），Client 半在侧栏注册入口并渲染面板。
+
+- 左侧文件树：来源（Core / DLC）→ 分类（武器与装备、物品、建筑、植物、动物与生物、生产与配方、研究、能力与状态、世界与地形、其他）→ Def；
+- 右侧结构树：根节点为贴图 + 名称，下分「属性」（含 `fields` 展开）与「来源与继承」；
+- 搜索：中英文关键词，结果保留在左侧，可点 × 清除；命中后自动展开树路径并有动画；
+- 贴图：Host 调 `scripts/render_icon.py` 从 `Assets.zip` 解码 DDS，失败回落 `assets/placeholder.jpg`。
+
+安装（会改动 profile 全局状态）：
+
+```bash
+# 由 DSH 的 plugin_manager 安装本目录，例如：
+# install_bundle target=E:\DataE\condex_file\git_repository\RimWorld_Mod\ui
+```
+
+`ui/cordis.patch.yml` 里是**本机绝对路径**（数据、游戏、Python、渲染脚本、占位图），移动仓库或换机后需要修改并重装。
 
 ## 待决事项
 

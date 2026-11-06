@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 # 查询层能理解的输出结构版本。
-SUPPORTED_SCHEMA_VERSION = 3
+SUPPORTED_SCHEMA_VERSION = 4
 
 # 中文提示文案（工具结果里直接展示）。
 NOTE_PARENT_UNRESOLVED = "该 Def 的 ParentName 不在扫描范围内，字段可能不完整，请查看 ParentName 指向的模板。"
