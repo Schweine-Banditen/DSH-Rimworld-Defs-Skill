@@ -123,6 +123,8 @@ export function apply(ctx, config = {}) {
   const pythonExe = config.pythonExe || 'python'
   const renderScript = config.renderScript
   const placeholderPath = config.placeholderPath
+  const cacheDir = config.cacheDir
+  const unityPyPath = config.unityPyPath
 
   let cache = { mtimeMs: 0, payload: null, index: null, lookup: null }
   const iconCache = new Map()
@@ -247,13 +249,16 @@ export function apply(ctx, config = {}) {
     return scored.slice(0, limit)
   }
 
-  function renderIcon(texPath) {
+  function renderIcon(texPath, source) {
     if (!renderScript) return Promise.reject(new Error('renderScript not configured'))
-    if (iconCache.has(texPath)) return Promise.resolve(iconCache.get(texPath))
+    const cacheKey = `${source}|${texPath}`
+    if (iconCache.has(cacheKey)) return Promise.resolve(iconCache.get(cacheKey))
+    const args = [renderScript, '--game', gameRoot, '--source', source || 'Core', '--tex', texPath]
+    if (cacheDir) args.push('--cache-dir', cacheDir)
+    const env = { ...process.env }
+    if (unityPyPath) env.PYTHONPATH = env.PYTHONPATH ? `${unityPyPath};${env.PYTHONPATH}` : unityPyPath
     return new Promise((resolve, reject) => {
-      const child = spawn(pythonExe, [renderScript, '--game', gameRoot, '--tex', texPath], {
-        windowsHide: true,
-      })
+      const child = spawn(pythonExe, args, { windowsHide: true, env })
       const chunks = []
       let stderr = ''
       const timer = setTimeout(() => child.kill(), 20000)
@@ -269,7 +274,7 @@ export function apply(ctx, config = {}) {
         clearTimeout(timer)
         if (code === 0 && chunks.length > 0) {
           const buffer = Buffer.concat(chunks)
-          iconCache.set(texPath, buffer)
+          iconCache.set(cacheKey, buffer)
           resolve(buffer)
         } else {
           reject(new Error(`render_icon exit ${code}: ${stderr.trim()}`))
@@ -335,9 +340,12 @@ export function apply(ctx, config = {}) {
     }
     if (path === `${API_PREFIX}/icon`) {
       const tex = url.searchParams.get('tex') || ''
-      if (!TEX_PATTERN.test(tex)) return new Response('bad tex', { status: 400 })
+      const source = url.searchParams.get('source') || 'Core'
+      if (!TEX_PATTERN.test(tex) || !TEX_PATTERN.test(source)) {
+        return new Response('bad tex', { status: 400 })
+      }
       try {
-        const png = await renderIcon(tex)
+        const png = await renderIcon(tex, source)
         return new Response(png, {
           headers: { 'content-type': 'image/png', 'cache-control': 'max-age=3600' },
         })

@@ -404,7 +404,11 @@ window.__ModuleLoader__.load({
 
       const graphic = record.graphic || {}
       const tex = graphic.effective && graphic.effective.texPath
-      const src = tex && !imageFailed ? `${API}/icon?tex=${encodeURIComponent(tex)}` : PLACEHOLDER
+      // Core 的 .split 贴图格式暂未解析，直接使用占位图并给出提示。
+      const coreUnsupported = record.source === 'Core' && !!tex
+      const src = tex && !coreUnsupported && !imageFailed
+        ? `${API}/icon?tex=${encodeURIComponent(tex)}&source=${encodeURIComponent(record.source)}`
+        : PLACEHOLDER
       const name =
         record.labelZh || record.label || record.titleZh || record.title || record.defName || record.Name || '(无显示名)'
       const chain = record.parentChain || []
@@ -422,7 +426,10 @@ window.__ModuleLoader__.load({
             { style: { minWidth: 0 } },
             h('div', { style: styles.rootTitle }, name),
             h('div', { style: styles.rootSub }, `${record.defType} · ${record.defName || record.Name || '(无 defName)'}`),
-            h('div', { style: styles.rootSub }, `来源 ${record.source}${tex ? ' · 有贴图' : ' · 使用占位图'}`),
+            h('div', { style: styles.rootSub }, `来源 ${record.source}${coreUnsupported ? ' · Core 贴图暂不支持显示' : tex ? ' · 有贴图' : ' · 使用占位图'}`),
+            coreUnsupported
+              ? h('div', { style: { ...styles.rootSub, color: 'var(--dsw-alias-state-warn-primary)' } }, 'Core 的 .split 贴图格式尚未解析，暂以占位图显示；DLC 贴图正常。')
+              : null,
           ),
         ),
         h('div', { style: styles.connectorWrap }, h('div', { style: styles.connectorLine })),

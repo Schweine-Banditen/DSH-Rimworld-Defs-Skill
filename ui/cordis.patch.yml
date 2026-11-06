@@ -7,3 +7,5 @@
         pythonExe: 'D:\tools\python\python.exe'
         renderScript: 'E:\DataE\condex_file\git_repository\RimWorld_Mod\scripts\render_icon.py'
         placeholderPath: 'E:\DataE\condex_file\git_repository\RimWorld_Mod\assets\placeholder.jpg'
+        cacheDir: 'E:\DataE\condex_file\git_repository\RimWorld_Mod\data\icon-cache'
+        unityPyPath: 'E:\DataE\game\Rimworld_mod\out\unitypy'
