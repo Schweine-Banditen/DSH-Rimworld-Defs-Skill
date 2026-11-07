@@ -836,7 +836,6 @@
     "preExplosionSpawnChance": "爆炸前生成几率",
     "explosionSound": "爆炸音效",
     "applicableToMechs": "适用于机械体",
-    "﻿durationDays": "持续天数",
     "preCastTicks": "施法前摇（刻）",
     "destClamorRadius": "目标喧闹半径",
     "studyEnabledByDefault": "默认可研究",
@@ -845,6 +844,7 @@
     "postExplosionSpawnThingCount": "爆炸后生成数量",
     "hackedInspectString": "已入侵检视文本",
     "largeOverdoseChance": "大剂量过量几率",
-    "gizmoTipKey": "操作提示键"
+    "gizmoTipKey": "操作提示键",
+    "durationDays": "持续天数"
   }
 }
