@@ -15,6 +15,26 @@ window.__ModuleLoader__.load({
     const PLACEHOLDER = `${API}/placeholder`
     const STORAGE_KEY = 'rimworld-defs.translations'
 
+    /**
+     * 读 JSON 响应：先取文本再解析，避免在空响应上直接 `.json()`
+     * （例如网关返回 405/404 且 body 为空时会抛 "Unexpected end of JSON input"）。
+     */
+    async function readJsonResponse(response) {
+      const text = await response.text()
+      let payload = null
+      try {
+        payload = text ? JSON.parse(text) : null
+      } catch {
+        payload = null
+      }
+      if (!response.ok) {
+        const detail = (payload && payload.error) || response.statusText || ''
+        throw new Error(`HTTP ${response.status}${detail ? `：${detail}` : ''}`)
+      }
+      if (payload === null) throw new Error('服务器返回了空响应')
+      return payload
+    }
+
     const MATERIALS = [
       { id: 'default', label: '默认（灰）', color: '#9a9a9a' },
       { id: 'steel', label: '钢铁（土灰）', color: '#6f6a60' },
@@ -1145,7 +1165,7 @@ window.__ModuleLoader__.load({
 
       const loadState = useCallback(() => {
         fetch(`${API}/workshop/state`)
-          .then((response) => response.json())
+          .then(readJsonResponse)
           .then((payload) => setData(payload))
           .catch((err) => setError(String(err)))
       }, [])
@@ -1159,9 +1179,7 @@ window.__ModuleLoader__.load({
         setError('')
         setNotice('')
         try {
-          const response = await fetch(`${API}/workshop/detect`, { method: 'POST' })
-          const payload = await response.json()
-          if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`)
+          const payload = await readJsonResponse(await fetch(`${API}/workshop/detect`))
           setData(payload)
           setNotice(`检测完成：${(payload.mods || []).length} 个模组`)
         } catch (err) {
@@ -1175,9 +1193,7 @@ window.__ModuleLoader__.load({
         setBusy(id)
         setError('')
         try {
-          const response = await fetch(`${API}/workshop/pull?id=${encodeURIComponent(id)}`, { method: 'POST' })
-          const payload = await response.json()
-          if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`)
+          const payload = await readJsonResponse(await fetch(`${API}/workshop/pull?id=${encodeURIComponent(id)}`))
           await loadState()
           onIndexChanged?.()
           setNotice(`已拉取「${payload.mod.name}」：${payload.mod.defsCount} 个 Def`)
@@ -1192,8 +1208,7 @@ window.__ModuleLoader__.load({
         setBusy(id)
         setError('')
         try {
-          const response = await fetch(`${API}/workshop/remove?id=${encodeURIComponent(id)}`, { method: 'POST' })
-          if (!response.ok) throw new Error(`HTTP ${response.status}`)
+          await readJsonResponse(await fetch(`${API}/workshop/remove?id=${encodeURIComponent(id)}`))
           await loadState()
           onIndexChanged?.()
           setNotice('已删除，文件树中不再显示')

@@ -545,14 +545,14 @@ export function apply(ctx, config = {}) {
     if (path === `${API_PREFIX}/workshop/state`) {
       return json(statePayload(readWorkshopState()))
     }
-    if (path === `${API_PREFIX}/workshop/detect` && request.method === 'POST') {
+    if (path === `${API_PREFIX}/workshop/detect`) {
       try {
         return json(statePayload(await detectWorkshopMods()))
       } catch (error) {
         return json({ error: `检测失败：${error.message}` }, 502)
       }
     }
-    if ((path === `${API_PREFIX}/workshop/pull` || path === `${API_PREFIX}/workshop/update`) && request.method === 'POST') {
+    if (path === `${API_PREFIX}/workshop/pull` || path === `${API_PREFIX}/workshop/update`) {
       const id = url.searchParams.get('id') || ''
       if (!/^\d+$/.test(id)) return json({ error: 'bad id' }, 400)
       const state = readWorkshopState()
@@ -578,7 +578,7 @@ export function apply(ctx, config = {}) {
         return json({ error: `拉取失败：${error.message}` }, 502)
       }
     }
-    if (path === `${API_PREFIX}/workshop/remove` && request.method === 'POST') {
+    if (path === `${API_PREFIX}/workshop/remove`) {
       const id = url.searchParams.get('id') || ''
       if (!/^\d+$/.test(id)) return json({ error: 'bad id' }, 400)
       const state = readWorkshopState()
