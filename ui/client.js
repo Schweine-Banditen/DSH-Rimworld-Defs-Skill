@@ -1251,7 +1251,7 @@ window.__ModuleLoader__.load({
         {
           id: WORKING_SET,
           name: '临时修改',
-          description: WORKING.source ? `来自「${setLabel(WORKING.source)}」，自动保存最后改动` : '自动保存最后改动，始终只保留一份',
+          description: WORKING.source ? `你最近的修改（来自「${setLabel(WORKING.source)}」）` : '你最近的修改',
           count: translatedCount,
           deletable: false,
           current: true,
