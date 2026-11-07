@@ -49,12 +49,20 @@ def def_identity(record: dict[str, Any]) -> str | None:
 class DefsData:
     """一份已加载的 Defs 数据，提供查询与索引。"""
 
-    def __init__(self, data_path: Path | str, game_root: Path | str | None = None):
+    def __init__(
+        self,
+        data_path: Path | str,
+        game_root: Path | str | None = None,
+        scope: str = "all",
+    ):
         self.path = Path(data_path).expanduser().resolve()
         if not self.path.is_file():
             raise FileNotFoundError(f"数据文件不存在：{self.path}")
         self.payload = json.loads(self.path.read_text(encoding="utf-8-sig"))
-        self.defs: list[dict[str, Any]] = list(self.payload.get("defs") or [])
+        self.scope = scope if scope in ("all", "g", "c", "m") else "all"
+        self.defs: list[dict[str, Any]] = self._apply_scope(
+            self.path.parent, list(self.payload.get("defs") or [])
+        )
         self.game_root = Path(game_root).expanduser().resolve() if game_root else None
         if self.game_root is None and self.payload.get("gameRoot"):
             self.game_root = Path(self.payload["gameRoot"])
@@ -64,6 +72,44 @@ class DefsData:
         self._label_entries: list[tuple[str, str, dict[str, Any]]] = []
         self._build_indexes()
         self._notice_cache: dict[str, Any] | None = None
+
+    # ------------------------------------------------------------------
+    # 来源范围（本体/DLC、创意工坊、我的模组）
+    # ------------------------------------------------------------------
+
+    def _apply_scope(
+        self, base_dir: Path, game_defs: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """按 ``--scope`` 合并三个来源；工坊/我的模组取自数据目录下的子目录。"""
+
+        def load(directory: Path, origin: str) -> list[dict[str, Any]]:
+            records: list[dict[str, Any]] = []
+            if not directory.is_dir():
+                return records
+            for file in sorted(directory.glob("*.json")):
+                try:
+                    payload = json.loads(file.read_text(encoding="utf-8-sig"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                name = payload.get("name") or file.stem
+                for record in payload.get("defs") or []:
+                    item = dict(record)
+                    # 来源用模组/文件夹名更可读；原始 source 在文件里仍是 workshop:<id>。
+                    item["source"] = name
+                    item["origin"] = origin
+                    records.append(item)
+            return records
+
+        workshop = load(base_dir / "workshop", "workshop") if self.scope in ("all", "c") else []
+        mine = load(base_dir / "mine", "mine") if self.scope in ("all", "m") else []
+
+        if self.scope == "g":
+            return [dict(record, origin="game") for record in game_defs]
+        if self.scope == "c":
+            return workshop
+        if self.scope == "m":
+            return mine
+        return [dict(record, origin="game") for record in game_defs] + workshop + mine
 
     # ------------------------------------------------------------------
     # 索引
@@ -434,6 +480,12 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--output", default=argparse.SUPPRESS, metavar="FILE", help="把结果写入文件而不是 stdout")
     common.add_argument("--pretty", default=argparse.SUPPRESS, action="store_true", help="缩进输出")
     common.add_argument("--unicode", default=argparse.SUPPRESS, action="store_true", help="输出原始中文（默认转义为 \\uXXXX）")
+    common.add_argument(
+        "--scope",
+        default=argparse.SUPPRESS,
+        choices=("all", "g", "c", "m"),
+        help="来源过滤：g=仅本体与 DLC，c=仅创意工坊，m=仅我的模组；默认 all",
+    )
 
     parser = argparse.ArgumentParser(
         prog="query_defs",
@@ -508,7 +560,7 @@ def main(argv: list[str] | None = None) -> int:
     resolved_path = paths.data_path(args.json)
     resolved_game, _ = paths.game_root(args.game, resolved_path)
     try:
-        data = DefsData(resolved_path, resolved_game)
+        data = DefsData(resolved_path, resolved_game, scope=getattr(args, "scope", "all"))
     except FileNotFoundError as exc:
         print(str(exc), file=sys.stderr)
         return 2

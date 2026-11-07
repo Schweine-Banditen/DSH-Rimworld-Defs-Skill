@@ -5,10 +5,10 @@
  * quick search and rendered item textures. Textures come from Assets.zip as
  * split DDS compressed with ZSTD; the project's Python renderer decodes them.
  */
-import { mkdirSync, existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { resolve as resolvePath, join, sep } from 'node:path'
+import { resolve as resolvePath, dirname, join, sep } from 'node:path'
 import { PACKAGE_DIR, REPO_ROOT, resolvePaths } from './paths.js'
 import { TOOL_CATALOG, createTools } from './tools.js'
 
@@ -127,14 +127,16 @@ export function apply(ctx, config = {}) {
 
   // 所有路径都由 ui/paths.js 解析：环境变量 → 本机配置 → bundle 配置 → 仓库派生。
   // 仓库里不再存放绝对路径，换机只需重建工作区联接、重新生成数据。
-  const paths = resolvePaths(config)
-  const dataPath = paths.dataPath.value
-  const gameRoot = paths.gameRoot.value
-  const pythonExe = paths.pythonExe.value
-  const renderScript = paths.renderScript.value
-  const placeholderPath = paths.placeholderPath.value
-  const cacheDir = paths.cacheDir.value
-  const unityPyPath = paths.unityPyPath.value
+  // 这些变量可在「基础设置」里修改数据目录后热重载。
+  let paths = resolvePaths(config)
+  let dataPath = paths.dataPath.value
+  let dataDir = dirname(dataPath)
+  let gameRoot = paths.gameRoot.value
+  let pythonExe = paths.pythonExe.value
+  let renderScript = paths.renderScript.value
+  let placeholderPath = paths.placeholderPath.value
+  let cacheDir = paths.cacheDir.value
+  let unityPyPath = paths.unityPyPath.value
 
   ctx.logger?.info?.(
     `rimworld-defs: 路径解析 data=${paths.dataPath.source} game=${paths.gameRoot.source} python=${paths.pythonExe.source}`,
@@ -146,9 +148,8 @@ export function apply(ctx, config = {}) {
   }
 
   // ---- 创意工坊：状态 + 检测 / 拉取 / 删除（不做任何自动爬取）----
-  const dataDir = join(REPO_ROOT, 'data')
-  const workshopDir = join(dataDir, 'workshop')
-  const workshopStatePath = join(dataDir, 'workshop-state.json')
+  let workshopDir = join(dataDir, 'workshop')
+  let workshopStatePath = join(dataDir, 'workshop-state.json')
   const workshopScript = join(REPO_ROOT, 'scripts', 'workshop_defs.py')
   const workshopCache = new Map()
 
@@ -318,8 +319,8 @@ export function apply(ctx, config = {}) {
   }
 
   // ---- 我的模组：用户自己的工作文件夹（可能含多个 Mod）----
-  const mineDir = join(dataDir, 'mine')
-  const mineStatePath = join(dataDir, 'mymods-state.json')
+  let mineDir = join(dataDir, 'mine')
+  let mineStatePath = join(dataDir, 'mymods-state.json')
   const mineScript = join(REPO_ROOT, 'scripts', 'mymods_defs.py')
   const mineCache = new Map()
 
@@ -427,6 +428,51 @@ export function apply(ctx, config = {}) {
   let cache = { mtimeMs: 0, payload: null, index: null, lookup: null }
   const iconCache = new Map()
   const TEX_PATTERN = /^[A-Za-z0-9 _\-/.:]+$/
+
+  // ---- 基础设置：数据目录（写回 rimworld-defs.local.json 的 dataPath）----
+  const localConfigPath = join(REPO_ROOT, 'rimworld-defs.local.json')
+
+  function readLocalConfig() {
+    try {
+      const parsed = JSON.parse(readFileSync(localConfigPath, 'utf8'))
+      if (parsed && typeof parsed === 'object') return parsed
+    } catch {
+      /* 配置缺失或损坏 */
+    }
+    return {}
+  }
+
+  function basicSettings() {
+    const local = readLocalConfig()
+    const saved = typeof local.dataPath === 'string' && local.dataPath.trim() ? local.dataPath : null
+    return {
+      dataPath: { value: dataPath, source: paths.dataPath.source, exists: existsSync(dataPath) },
+      savedDataPath: saved || join(REPO_ROOT, 'data', 'rimworld-defs.json'),
+      defaultDataPath: join(REPO_ROOT, 'data', 'rimworld-defs.json'),
+      dataDir,
+      localConfig: localConfigPath,
+    }
+  }
+
+  /** 配置变更后重解析路径并丢弃所有派生缓存。 */
+  function reloadPaths() {
+    paths = resolvePaths(config)
+    dataPath = paths.dataPath.value
+    dataDir = dirname(dataPath)
+    gameRoot = paths.gameRoot.value
+    pythonExe = paths.pythonExe.value
+    renderScript = paths.renderScript.value
+    placeholderPath = paths.placeholderPath.value
+    cacheDir = paths.cacheDir.value
+    unityPyPath = paths.unityPyPath.value
+    workshopDir = join(dataDir, 'workshop')
+    workshopStatePath = join(dataDir, 'workshop-state.json')
+    mineDir = join(dataDir, 'mine')
+    mineStatePath = join(dataDir, 'mymods-state.json')
+    cache = { mtimeMs: 0, payload: null, index: null, lookup: null }
+    workshopCache.clear()
+    mineCache.clear()
+  }
 
   function loadData() {
     if (!dataPath) throw new Error('尚未解析到数据文件路径')
@@ -632,6 +678,49 @@ export function apply(ctx, config = {}) {
       appendWorkshopIndex(sources)
       appendMineIndex(sources)
       return json({ notice: notice(payload), groups: GROUPS, sources })
+    }
+    if (path === `${API_PREFIX}/settings/basic`) {
+      return json(basicSettings())
+    }
+    if (path === `${API_PREFIX}/settings/basic/set`) {
+      const dir = (url.searchParams.get('dir') || '').trim()
+      if (!dir) return json({ error: '请填写数据目录' }, 400)
+      const resolvedDir = resolvePath(dir)
+      // 只接受已存在的目录：不存在就保持原样并报错，不替用户创建。
+      if (!existsSync(resolvedDir) || !statSync(resolvedDir).isDirectory()) {
+        return json({ error: `目录不存在：${resolvedDir}` }, 404)
+      }
+      const localConfig = readLocalConfig()
+      localConfig.dataPath = join(resolvedDir, 'rimworld-defs.json')
+      try {
+        // 换目录时把工坊/我的模组的状态与已拉取数据迁移过去，避免静默丢失。
+        if (resolvedDir !== dataDir) {
+          for (const name of ['workshop-state.json', 'mymods-state.json']) {
+            const source = join(dataDir, name)
+            const target = join(resolvedDir, name)
+            if (existsSync(source) && !existsSync(target)) cpSync(source, target)
+          }
+          for (const name of ['workshop', 'mine']) {
+            const source = join(dataDir, name)
+            const target = join(resolvedDir, name)
+            if (existsSync(source) && !existsSync(target)) cpSync(source, target, { recursive: true })
+          }
+        }
+        writeFileSync(localConfigPath, `${JSON.stringify(localConfig, null, 2)}\n`, 'utf8')
+      } catch (error) {
+        return json({ error: `写入配置失败：${error.message}` }, 500)
+      }
+      reloadPaths()
+      return json(basicSettings())
+    }
+    if (path === `${API_PREFIX}/settings/basic/regenerate`) {
+      try {
+        const output = await runPython([join(REPO_ROOT, 'scripts', 'extract_defs.py')], 300000)
+        reloadPaths()
+        return json({ ok: true, output: String(output).trim().slice(-600), settings: basicSettings() })
+      } catch (error) {
+        return json({ error: `生成失败：${error.message}` }, 502)
+      }
     }
     if (path === `${API_PREFIX}/workshop/state`) {
       return json(statePayload(readWorkshopState()))
