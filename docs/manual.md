@@ -85,11 +85,11 @@ python scripts/extract_defs.py --check
 # 2) 重建（约 2.4 s，原子写入；自动对比上一份并写 changes）
 python scripts/extract_defs.py
 
-# 3) 抽样校验（可选，但建议）
-python scripts/verify_defs.py --json data/rimworld-defs.json --game "<RimWorld 根目录>" --samples 100
+# 3) 抽样校验（可选，但建议；路径同样自动解析）
+python scripts/verify_defs.py --samples 100
 ```
 
-- 游戏目录**自动发现**：`--game` / `RIMWORLD_GAME` → `rimworld-defs.local.json` → 数据文件记录 → Steam（注册表 + `libraryfolders.vdf`）；非标准安装才需要显式指定，`verify_defs.py` 目前仍要求 `--game`；
+- 游戏目录**自动发现**：`--game` / `RIMWORLD_GAME` → `rimworld-defs.local.json` → 数据文件记录 → Steam（注册表 + `libraryfolders.vdf`）；三个脚本都支持省略路径参数；
 
 - 数据文件 `data/rimworld-defs.json`（schema 4）与 `data/changes-history.json` 均被 gitignore，不进仓库；
 - **不会自动重建**：UI 只显示“数据过期”，是否更新由人决定（版本变化可能是回退）；

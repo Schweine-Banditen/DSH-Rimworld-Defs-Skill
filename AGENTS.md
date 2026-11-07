@@ -91,8 +91,8 @@ python scripts/query_defs.py search-def Steel --unicode
 python scripts/query_defs.py search-label 钢 --limit 10
 python scripts/query_defs.py list-category --category Item --thing-categories ResourcesRaw --def-type ThingDef
 
-# 抽样校验
-python scripts/verify_defs.py --json data/rimworld-defs.json --game "<根>" --samples 100
+# 抽样校验（路径自动解析）
+python scripts/verify_defs.py --samples 100
 
 # 单张图标（调试）
 python scripts/render_icon.py --game "<根>" --source Royalty --tex "Things/Pawn/Humanlike/Apparel/CataphractArmor/CataphractArmor" > icon.png

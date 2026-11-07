@@ -5,7 +5,11 @@
 
 用法::
 
-    python verify_defs.py --json <rimworld-defs.json> --game <RimWorld 根目录> [--samples 100] [--seed 20261106]
+    python verify_defs.py [--json <rimworld-defs.json>] [--game <RimWorld 根目录>] \\
+        [--samples 100] [--seed 20261106]
+
+两个路径都可省略：默认走 `scripts/paths.py` 的解析（环境变量 → 本机配置 →
+仓库派生 → Steam 自动发现）。
 """
 
 from __future__ import annotations
@@ -19,13 +23,18 @@ from pathlib import Path, PurePosixPath
 
 from lxml import etree
 
+# 同一目录下的 paths 模块：脚本与 `import verify_defs` 两种用法都能找到。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import paths  # noqa: E402 - 导入位置取决于上面的 sys.path 处理
+
 DEFAULT_LANGUAGE = "ChineseSimplified (简体中文)"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="verify_defs", description="抽样校验 JSON 与原始 XML")
-    parser.add_argument("--json", required=True, metavar="FILE")
-    parser.add_argument("--game", required=True, metavar="DIR")
+    parser.add_argument("--json", default=None, metavar="FILE", help="默认 RIMWORLD_DATA → 本机配置 → 仓库 data/rimworld-defs.json")
+    parser.add_argument("--game", default=None, metavar="DIR", help="默认 RIMWORLD_GAME → 本机配置 → 数据文件记录 → Steam 自动发现")
     parser.add_argument("--samples", type=int, default=100)
     parser.add_argument("--seed", type=int, default=20261106)
     parser.add_argument("--language", default=DEFAULT_LANGUAGE)
@@ -234,11 +243,32 @@ def expected_effective(record: dict, own: dict | None, index: dict) -> dict | No
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    game_root = Path(args.game).expanduser().resolve()
-    data = json.loads(Path(args.json).read_text(encoding="utf-8-sig"))
+
+    data_path = paths.data_path(args.json)
+    if not data_path.is_file():
+        print(
+            f"错误：数据文件不存在：{data_path}（先运行 python scripts/extract_defs.py）",
+            file=sys.stderr,
+        )
+        return 2
+
+    game_root, game_source = paths.game_root(args.game, data_path)
+    if game_root is None:
+        print(
+            "错误：找不到 RimWorld 根目录（其下应存在 Data/Core/Defs）。"
+            "请用 --game 指定，或设置环境变量 RIMWORLD_GAME，"
+            f"或在 {paths.local_config_path()} 中写入 gameRoot。",
+            file=sys.stderr,
+        )
+        return 2
+
+    data = json.loads(data_path.read_text(encoding="utf-8-sig"))
     defs = [d for d in data["defs"] if d.get("defName") or d.get("Name")]
     rng = random.Random(args.seed)
     sample = rng.sample(defs, min(args.samples, len(defs)))
+
+    print(f"数据: {data_path}")
+    print(f"游戏: {game_root}（来源 {game_source}）")
 
     sources = sorted({d["source"] for d in defs})
     translations = load_translations(game_root, sources, args.language)
