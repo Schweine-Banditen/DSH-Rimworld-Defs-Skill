@@ -7,6 +7,7 @@
  */
 import { mkdirSync, existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { execFile, spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { resolve as resolvePath, join, sep } from 'node:path'
 import { PACKAGE_DIR, REPO_ROOT, resolvePaths } from './paths.js'
 import { TOOL_CATALOG, createTools } from './tools.js'
@@ -257,7 +258,6 @@ export function apply(ctx, config = {}) {
     return payload
   }
 
-  /** 创意工坊贴图：模组自带的 PNG/JPG，按 texPath 在 Textures 下查找。 */
   /** 把已拉取的工坊模组挂到索引里：一个 "Mods" 来源，按模组分组，不再细分。 */
   function appendWorkshopIndex(sources) {
     const state = readWorkshopState()
@@ -312,6 +312,94 @@ export function apply(ctx, config = {}) {
         if (existsSync(file)) {
           return { bytes: readFileSync(file), type: extension === '.png' ? 'image/png' : 'image/jpeg' }
         }
+      }
+    }
+    return null
+  }
+
+  // ---- 我的模组：用户自己的工作文件夹（可能含多个 Mod）----
+  const mineDir = join(dataDir, 'mine')
+  const mineStatePath = join(dataDir, 'mymods-state.json')
+  const mineScript = join(REPO_ROOT, 'scripts', 'mymods_defs.py')
+  const mineCache = new Map()
+
+  function mineFolderId(folderPath) {
+    const normalized = String(folderPath).replace(/\\/g, '/').toLowerCase()
+    return createHash('sha1').update(normalized).digest('hex').slice(0, 12)
+  }
+
+  function readMineState() {
+    try {
+      const parsed = JSON.parse(readFileSync(mineStatePath, 'utf8'))
+      if (parsed && Array.isArray(parsed.folders)) return parsed
+    } catch {
+      /* 状态文件缺失或损坏 */
+    }
+    return { folders: [] }
+  }
+
+  function writeMineState(state) {
+    mkdirSync(dataDir, { recursive: true })
+    writeFileSync(mineStatePath, `${JSON.stringify(state, null, 2)}\n`, 'utf8')
+  }
+
+  function loadMineFolder(id, state) {
+    const entry = (state || readMineState()).folders.find((item) => item.id === id)
+    if (!entry) return null
+    const file = join(mineDir, `${id}.json`)
+    if (!existsSync(file)) return null
+    const mtimeMs = statSync(file).mtimeMs
+    const cached = mineCache.get(id)
+    if (cached && cached.mtimeMs === mtimeMs) return cached.payload
+    const payload = JSON.parse(readFileSync(file, 'utf8'))
+    mineCache.set(id, { mtimeMs, payload })
+    return payload
+  }
+
+  function appendMineIndex(sources) {
+    const state = readMineState()
+    const groups = []
+    for (const folder of state.folders) {
+      const payload = loadMineFolder(folder.id, state)
+      if (!payload) continue
+      const items = (payload.defs || [])
+        .filter((record) => record.defName || record.Name)
+        .map((record) => ({
+          defName: record.defName || record.Name,
+          defType: record.defType,
+          label: record.labelZh || record.label || record.titleZh || record.title || record.defName || record.Name || '',
+        }))
+      if (items.length === 0) continue
+      items.sort((a, b) => (a.label || a.defName).localeCompare(b.label || b.defName))
+      groups.push({ key: `mine:${folder.id}`, label: folder.name, count: items.length, items })
+    }
+    sources.push({ name: 'Mine', count: groups.reduce((sum, group) => sum + group.count, 0), groups })
+  }
+
+  function findMineDef(name, defType) {
+    const state = readMineState()
+    for (const folder of state.folders) {
+      const payload = loadMineFolder(folder.id, state)
+      if (!payload) continue
+      const hit = (payload.defs || []).find(
+        (record) =>
+          (record.defName === name || record.Name === name) &&
+          (!defType || String(record.defType || '').toLowerCase() === defType.toLowerCase()),
+      )
+      if (hit) return hit
+    }
+    return null
+  }
+
+  function mineTexture(id, texPath, state) {
+    const folder = (state || readMineState()).folders.find((item) => item.id === id)
+    if (!folder) return null
+    const base = String(texPath || '').replace(/^\/+/, '').replace(/\\/g, '/')
+    const rel = base.startsWith('Textures/') ? base : `Textures/${base}`
+    for (const extension of ['.png', '.jpg', '.jpeg']) {
+      const file = join(folder.path, `${rel}${extension}`)
+      if (existsSync(file)) {
+        return { bytes: readFileSync(file), type: extension === '.png' ? 'image/png' : 'image/jpeg' }
       }
     }
     return null
@@ -540,8 +628,9 @@ export function apply(ctx, config = {}) {
       const { payload } = loadData()
       // buildIndex 会缓存并复用同一个数组，先过滤掉旧的 Mods 再追加，
       // 否则多次请求会在这个缓存数组里累积出多个 "Mods" 来源。
-      const sources = buildIndex(payload).filter((source) => source.name !== 'Mods')
+      const sources = buildIndex(payload).filter((source) => source.name !== 'Mods' && source.name !== 'Mine')
       appendWorkshopIndex(sources)
+      appendMineIndex(sources)
       return json({ notice: notice(payload), groups: GROUPS, sources })
     }
     if (path === `${API_PREFIX}/workshop/state`) {
@@ -600,6 +689,56 @@ export function apply(ctx, config = {}) {
       workshopCache.delete(id)
       return json({ mod: entry })
     }
+    if (path === `${API_PREFIX}/mymods/state`) {
+      return json(readMineState())
+    }
+    if (path === `${API_PREFIX}/mymods/add`) {
+      const folderPath = (url.searchParams.get('path') || '').trim()
+      if (!folderPath) return json({ error: '请填写文件夹路径' }, 400)
+      const resolved = resolvePath(folderPath)
+      if (!existsSync(resolved) || !statSync(resolved).isDirectory()) {
+        return json({ error: `文件夹不存在：${resolved}` }, 404)
+      }
+      const id = mineFolderId(resolved)
+      try {
+        mkdirSync(mineDir, { recursive: true })
+        const outFile = join(mineDir, `${id}.json`)
+        await runPython([mineScript, 'extract', '--dir', resolved, '--id', id, '--out', outFile], 180000)
+        const payload = JSON.parse(readFileSync(outFile, 'utf8'))
+        const state = readMineState()
+        const existing = state.folders.find((item) => item.id === id)
+        const entry = {
+          id,
+          path: resolved,
+          name: payload.name || resolved.split(/[\\/]/).filter(Boolean).pop() || resolved,
+          defsCount: (payload.defs || []).length,
+          addedAt: existing ? existing.addedAt : new Date().toISOString(),
+        }
+        state.folders = existing
+          ? state.folders.map((item) => (item.id === id ? entry : item))
+          : [...state.folders, entry]
+        writeMineState(state)
+        mineCache.delete(id)
+        return json({ folder: entry })
+      } catch (error) {
+        return json({ error: `扫描失败：${error.message}` }, 502)
+      }
+    }
+    if (path === `${API_PREFIX}/mymods/remove`) {
+      const id = url.searchParams.get('id') || ''
+      const state = readMineState()
+      const next = state.folders.filter((item) => item.id !== id)
+      if (next.length === state.folders.length) return json({ error: '该文件夹不在列表中' }, 404)
+      state.folders = next
+      writeMineState(state)
+      try {
+        unlinkSync(join(mineDir, `${id}.json`))
+      } catch {
+        /* 文件可能已不存在 */
+      }
+      mineCache.delete(id)
+      return json({ ok: true })
+    }
     if (path === `${API_PREFIX}/workshop/preview`) {
       const id = url.searchParams.get('id') || ''
       const state = readWorkshopState()
@@ -625,6 +764,7 @@ export function apply(ctx, config = {}) {
           (!defType || String(item.defType || '').toLowerCase() === defType.toLowerCase()),
       )
       if (!record) record = findWorkshopDef(name, defType)
+      if (!record) record = findMineDef(name, defType)
       if (!record) return json({ error: 'not found', name, defType }, 404)
       return json({ notice: notice(payload), record })
     }
@@ -718,6 +858,23 @@ export function apply(ctx, config = {}) {
         }
       }
 
+      if (source.startsWith('mine:')) {
+        const state = readMineState()
+        const folderEntry = state.folders.find((item) => item.id === source.slice('mine:'.length))
+        if (!folderEntry) return new Response('bad source', { status: 400 })
+        const root = resolvePath(folderEntry.path)
+        const full = resolvePath(root, rel)
+        if (!full.startsWith(root + sep)) return new Response('bad path', { status: 400 })
+        try {
+          if (statSync(full).size > 4 * 1024 * 1024) return new Response('file too large', { status: 413 })
+          return new Response(readFileSync(full, 'utf8'), {
+            headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+          })
+        } catch {
+          return new Response('not found', { status: 404 })
+        }
+      }
+
       if (!rel.startsWith('Data/')) return new Response('bad path', { status: 400 })
       if (!gameRoot) {
         return json({ error: '未找到 RimWorld 目录，无法读取 XML', paths: pathSummary(paths) }, 503)
@@ -743,6 +900,13 @@ export function apply(ctx, config = {}) {
       }
       if (source.startsWith('workshop:')) {
         const found = workshopTexture(source.slice('workshop:'.length), tex, readWorkshopState())
+        if (!found) return new Response('icon unavailable', { status: 404 })
+        return new Response(found.bytes, {
+          headers: { 'content-type': found.type, 'cache-control': 'max-age=3600' },
+        })
+      }
+      if (source.startsWith('mine:')) {
+        const found = mineTexture(source.slice('mine:'.length), tex, readMineState())
         if (!found) return new Response('icon unavailable', { status: 404 })
         return new Response(found.bytes, {
           headers: { 'content-type': found.type, 'cache-control': 'max-age=3600' },
