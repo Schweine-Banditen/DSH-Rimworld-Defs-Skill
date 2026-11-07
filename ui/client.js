@@ -22,20 +22,98 @@ window.__ModuleLoader__.load({
       { id: 'uranium', label: '铀矿（淡灰）', color: '#b9bcc4' },
     ]
 
-    let TRANSLATIONS = {}
+    // ---- 翻译集：可保存、可切换的多份翻译表 ----
+    // 旧版只存一份（STORAGE_KEY）；首次启动时自动迁移成名为「我的翻译」的翻译集。
+    const PROFILE_KEY = 'rimworld-defs.translation-profiles'
+    const PRESET_CACHE_KEY = 'rimworld-defs.preset.zh-CN'
+    const DEFAULT_SET = 'default'
+    const BUILTIN_PRESET = 'zh-CN'
+
+    let BUILTIN = null
     try {
-      TRANSLATIONS = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') || {}
+      BUILTIN = JSON.parse(localStorage.getItem(PRESET_CACHE_KEY) || 'null')
     } catch {
-      TRANSLATIONS = {}
+      BUILTIN = null
     }
 
-    function saveTranslations() {
+    let PROFILES = { active: DEFAULT_SET, sets: {} }
+    let TRANSLATIONS = {}
+
+    function readStorage(key, fallback) {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(TRANSLATIONS))
+        const raw = localStorage.getItem(key)
+        return raw ? JSON.parse(raw) : fallback
       } catch {
-        /* ignore quota errors */
+        return fallback
       }
     }
+
+    function writeStorage(key, value) {
+      try {
+        localStorage.setItem(key, JSON.stringify(value))
+      } catch {
+        /* 配额满时静默失败：翻译只是本地便利功能 */
+      }
+    }
+
+    function replaceTranslations(entries) {
+      for (const key of Object.keys(TRANSLATIONS)) delete TRANSLATIONS[key]
+      Object.assign(TRANSLATIONS, entries || {})
+    }
+
+    /** 某个翻译集的条目：default 恒为空，内置集只读，其余取用户集合。 */
+    function entriesForSet(id) {
+      if (id === DEFAULT_SET) return {}
+      if (id === BUILTIN_PRESET) return (BUILTIN && BUILTIN.entries) || {}
+      return PROFILES.sets[id] || {}
+    }
+
+    function persistProfiles() {
+      writeStorage(PROFILE_KEY, PROFILES)
+    }
+
+    /** 只写用户集合；default 与内置集不落盘。 */
+    function persistActiveSet() {
+      if (PROFILES.active === DEFAULT_SET || PROFILES.active === BUILTIN_PRESET) return
+      PROFILES.sets[PROFILES.active] = { ...TRANSLATIONS }
+      persistProfiles()
+    }
+
+    function activateSet(id) {
+      PROFILES.active = id
+      replaceTranslations(entriesForSet(id))
+      persistProfiles()
+      return id
+    }
+
+    /** 把当前翻译复制成一个新集合（重名自动加序号），并切换过去。 */
+    function createSetFromCurrent(name) {
+      let candidate = String(name || '').trim() || '我的翻译'
+      if (PROFILES.sets[candidate]) {
+        let index = 2
+        while (PROFILES.sets[`${candidate} ${index}`]) index += 1
+        candidate = `${candidate} ${index}`
+      }
+      PROFILES.sets[candidate] = { ...TRANSLATIONS }
+      PROFILES.active = candidate
+      persistProfiles()
+      return candidate
+    }
+
+    (function bootTranslationProfiles() {
+      const saved = readStorage(PROFILE_KEY, null)
+      if (saved && typeof saved === 'object' && saved.sets && typeof saved.sets === 'object') {
+        PROFILES = { active: saved.active || DEFAULT_SET, sets: saved.sets }
+      } else {
+        const legacy = readStorage(STORAGE_KEY, {})
+        const hasLegacy = legacy && typeof legacy === 'object' && Object.keys(legacy).length > 0
+        PROFILES = hasLegacy
+          ? { active: '我的翻译', sets: { 我的翻译: legacy } }
+          : { active: DEFAULT_SET, sets: {} }
+        persistProfiles()
+      }
+      replaceTranslations(entriesForSet(PROFILES.active))
+    })()
 
     function zhOf(key) {
       const value = TRANSLATIONS[key]
@@ -263,6 +341,10 @@ window.__ModuleLoader__.load({
       tabItem: { padding: '7px 10px', borderRadius: 7, cursor: 'pointer', fontSize: 12.5 },
       tabActive: { background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-brand-primary)' },
       settingsBody: { flex: 1, overflow: 'auto', padding: '16px 22px' },
+      setBar: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' },
+      setLabel: { fontSize: 12, color: 'var(--dsw-alias-label-secondary)' },
+      select: { fontSize: 12, padding: '4px 6px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)' },
+      button: { fontSize: 12, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer' },
       table: { width: '100%', borderCollapse: 'collapse', fontSize: 12.5 },
       th: { textAlign: 'left', color: 'var(--dsw-alias-label-secondary)', fontWeight: 600, padding: '6px 8px', borderBottom: '1px solid var(--dsw-alias-border-l2)' },
       td: { padding: '4px 8px', borderBottom: '1px solid var(--dsw-alias-border-l1)', verticalAlign: 'middle' },
@@ -916,6 +998,10 @@ window.__ModuleLoader__.load({
       const [revision, setRevision] = useState(0)
       const [error, setError] = useState(null)
       const [toolInfo, setToolInfo] = useState(null)
+      const [activeSet, setActiveSet] = useState(PROFILES.active)
+      const [setNames, setSetNames] = useState(() => Object.keys(PROFILES.sets))
+      const [newSetName, setNewSetName] = useState('')
+      const [notice, setNotice] = useState('')
 
       useEffect(() => {
         fetch(`${API}/keys`)
@@ -926,6 +1012,17 @@ window.__ModuleLoader__.load({
           .then((response) => response.json())
           .then((payload) => setToolInfo(payload))
           .catch(() => setToolInfo({ tools: [], registered: [] }))
+        fetch(`${API}/presets`)
+          .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`))))
+          .then((preset) => {
+            BUILTIN = preset
+            writeStorage(PRESET_CACHE_KEY, preset)
+            if (PROFILES.active === BUILTIN_PRESET) {
+              replaceTranslations(entriesForSet(BUILTIN_PRESET))
+              setRevision((value) => value + 1)
+            }
+          })
+          .catch(() => setNotice('内置翻译集不可用（面板未提供预设文件）'))
       }, [])
 
       const filtered = keys.filter((key) => {
@@ -934,12 +1031,60 @@ window.__ModuleLoader__.load({
         return key.toLowerCase().includes(needle) || zhOf(key).toLowerCase().includes(needle)
       })
 
+      // 内置集与默认集只读：在它们上面编辑时，先把当前内容另存成一个用户集。
+      const ensureEditable = () => {
+        if (PROFILES.active !== DEFAULT_SET && PROFILES.active !== BUILTIN_PRESET) return
+        const name = createSetFromCurrent(newSetName || '我的翻译')
+        setActiveSet(name)
+        setSetNames(Object.keys(PROFILES.sets))
+        setNewSetName('')
+        setNotice(`已另存为「${name}」`)
+      }
+
+      const switchSet = (id) => {
+        if (id === activeSet) return
+        activateSet(id)
+        setActiveSet(id)
+        setSetNames(Object.keys(PROFILES.sets))
+        setRevision((value) => value + 1)
+        setNotice('')
+      }
+
       const setValue = (key, value) => {
+        ensureEditable()
         if (value.trim()) TRANSLATIONS[key] = value
         else delete TRANSLATIONS[key]
-        saveTranslations()
-        setRevision(revision + 1)
+        persistActiveSet()
+        setRevision((value) => value + 1)
       }
+
+      const saveNow = () => {
+        persistActiveSet()
+        setNotice(`已保存「${PROFILES.active}」`)
+      }
+
+      const saveAs = () => {
+        const name = createSetFromCurrent(newSetName)
+        persistActiveSet()
+        setActiveSet(name)
+        setSetNames(Object.keys(PROFILES.sets))
+        setNewSetName('')
+        setNotice(`已另存为「${name}」`)
+      }
+
+      const removeSet = () => {
+        if (PROFILES.active === DEFAULT_SET || PROFILES.active === BUILTIN_PRESET) return
+        const removed = PROFILES.active
+        delete PROFILES.sets[removed]
+        activateSet(DEFAULT_SET)
+        setActiveSet(DEFAULT_SET)
+        setSetNames(Object.keys(PROFILES.sets))
+        setRevision((value) => value + 1)
+        setNotice(`已删除「${removed}」`)
+      }
+
+      const builtinLabel = (BUILTIN && BUILTIN.label) || '简体中文（内置）'
+      const readOnlySet = activeSet === DEFAULT_SET || activeSet === BUILTIN_PRESET
 
       return h(
         'div',
@@ -970,6 +1115,33 @@ window.__ModuleLoader__.load({
             : h(
             'div',
             null,
+            h(
+              'div',
+              { style: styles.setBar },
+              h('span', { style: styles.setLabel }, '翻译集'),
+              h(
+                'select',
+                { style: styles.select, value: activeSet, onChange: (event) => switchSet(event.target.value) },
+                h('option', { value: DEFAULT_SET }, '默认（全部为空）'),
+                h('option', { value: BUILTIN_PRESET }, builtinLabel),
+                setNames.map((name) => h('option', { key: name, value: name }, name)),
+              ),
+              h('input', {
+                style: { ...styles.input, width: 180 },
+                placeholder: '另存为名称（留空自动命名）',
+                value: newSetName,
+                onChange: (event) => setNewSetName(event.target.value),
+                'aria-label': '另存为名称',
+              }),
+              h('button', { style: styles.button, onClick: saveNow, disabled: readOnlySet }, '保存'),
+              h('button', { style: styles.button, onClick: saveAs }, '另存为'),
+              h('button', { style: styles.button, onClick: removeSet, disabled: readOnlySet }, '删除'),
+              h(
+                'span',
+                { style: styles.empty },
+                notice || `已翻译 ${Object.keys(TRANSLATIONS).length} 项${readOnlySet ? ' · 只读集，编辑会自动另存' : ''}`,
+              ),
+            ),
             h(
             'div',
             { style: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 } },

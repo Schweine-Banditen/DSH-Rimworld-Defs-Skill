@@ -7,8 +7,8 @@
  */
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { spawn } from 'node:child_process'
-import { resolve as resolvePath, sep } from 'node:path'
-import { resolvePaths } from './paths.js'
+import { resolve as resolvePath, join, sep } from 'node:path'
+import { PACKAGE_DIR, resolvePaths } from './paths.js'
 import { TOOL_CATALOG, createTools } from './tools.js'
 
 export const name = 'rimworld-defs-ui'
@@ -417,6 +417,15 @@ export function apply(ctx, config = {}) {
         for (const name of record.thingCategories || []) keys.add(name)
       }
       return json({ keys: [...keys].sort((a, b) => a.localeCompare(b)) })
+    }
+    if (path === `${API_PREFIX}/presets`) {
+      // 内置翻译预设随包分发，只读；面板把它作为「可选翻译集」之一。
+      try {
+        const raw = readFileSync(join(PACKAGE_DIR, 'presets', 'zh-CN.json'), 'utf8')
+        return json(JSON.parse(raw))
+      } catch (error) {
+        return json({ error: `preset unavailable: ${error.message}` }, 503)
+      }
     }
     if (path === `${API_PREFIX}/tools`) {
       return json({ tools: TOOL_CATALOG, registered: registeredTools })
