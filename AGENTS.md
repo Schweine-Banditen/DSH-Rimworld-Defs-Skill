@@ -16,9 +16,11 @@ RimWorld 1.7（原版 + 官方 DLC）的 **Def 静态查看器**：Python 抽取
 | 变更历史 | `<repo>\data\changes-history.json`（gitignore，保留 2 条） |
 | 图标缓存 | `<repo>\data\icon-cache\`（gitignore） |
 | Python | `D:\tools\python\python.exe`（3.14.4，lxml 6.1.3、Pillow 11.3.0） |
-| UnityPy | 目前装在 `<workspace>\out\unitypy`（临时目录，见 §6） |
+| UnityPy | 目前装在 `<workspace>\out\unitypy`（临时目录，见 §6）；用本机配置 `unityPyPath` 指向，不写进 bundle |
 | UI bundle | `<repo>\ui`（以 link 方式装进 DSH profile） |
 | DSH profile | `C:\Users\lenovo\.dsh\profiles\desktop` |
+| Skill 发现 | `<workspace>\.dsh\skills\RimWorld_Mod` → 仓库根（目录联接，会话级；见 `docs/manual.md` §4.1） |
+| 本机路径覆盖 | `<repo>\rimworld-defs.local.json`（gitignore，参考 `.example.json`） |
 
 ## 2. 架构（四层）
 
@@ -70,23 +72,27 @@ DSH Web GUI（127.0.0.1:53701，本机回环，不联网）
 9. 安装/卸载 DSH bundle 会改变 profile 的全局状态：**先告知用户并等确认**。更新 UI 的步骤是 `remove_bundle` → `install_bundle`，然后让用户刷新页面。
 10. 大改动前先给方案与影响分析，等用户点头；每完成一个可审查单元就停下来让用户 review。
 11. **对既有代码做大范围修改前，必须先询问用户可行性**：先说明影响面（哪些文件/接口/数据格式会变）、风险与回滚方式，得到明确许可后再执行；不要先改完再解释。
+12. **仓库内禁止提交绝对路径**：本机差异放 `rimworld-defs.local.json`（gitignore）或环境变量（`RIMWORLD_GAME` / `RIMWORLD_DATA` / `RIMWORLD_PYTHON`）；路径解析统一走 `scripts/paths.py`，不要在脚本里另写一套。改动后用 `python scripts/paths.py --json` 确认来源正确。
 
 ## 5. 常用命令
 
 ```bash
-# 重建数据（约 2.4 s）
-python scripts/extract_defs.py --game "E:\SteamLibrary\steamapps\common\RimWorld"
+# 路径自检（游戏目录/数据/解释器各来自哪里）
+python scripts/paths.py --json
+
+# 重建数据（约 2.4 s；游戏目录自动发现）
+python scripts/extract_defs.py
 
 # 版本检查（0=最新，1=需重建，2=路径错误）
-python scripts/extract_defs.py --game "<根>" --check
+python scripts/extract_defs.py --check
 
 # 查询层
 python scripts/query_defs.py search-def Steel --unicode
 python scripts/query_defs.py search-label 钢 --limit 10
 python scripts/query_defs.py list-category --category Item --thing-categories ResourcesRaw --def-type ThingDef
 
-# 抽样校验
-python scripts/verify_defs.py --json data/rimworld-defs.json --game "<根>" --samples 100
+# 抽样校验（路径自动解析）
+python scripts/verify_defs.py --samples 100
 
 # 单张图标（调试）
 python scripts/render_icon.py --game "<根>" --source Royalty --tex "Things/Pawn/Humanlike/Apparel/CataphractArmor/CataphractArmor" > icon.png
@@ -103,7 +109,7 @@ python scripts/render_icon.py --game "<根>" --source Royalty --tex "Things/Pawn
 3. **UnityPy 是临时安装**：位于 `out/unitypy`，`ui/cordis.patch.yml` 的 `unityPyPath` 指向它。换机或清理工作区后 DLC 图标会失效；正确做法是 `pip install UnityPy` 到 `D:\tools\python` 并移除该配置。
 4. **查询层尚未注册为 DSH 工具**：`SKILL.md` 描述的四个 `@tool` 需要 TS 接入层，目前只有 UI 与 CLI。
 5. **遮罩类贴图**（护甲、部分服装）是灰度图，游戏运行时染色；静态显示为灰色剪影。
-6. `ui/cordis.patch.yml` 里是**本机绝对路径**（数据、游戏、Python、渲染脚本、占位图、缓存、UnityPy），移动仓库或换机必须改配置并重装。
+6. 路径**不写在** `ui/cordis.patch.yml`：`ui/paths.js` 从包位置派生 `dataPath` / `renderScript` / `placeholderPath` / `cacheDir`，游戏目录靠 Steam 自动发现；本机差异放 `rimworld-defs.local.json` 或环境变量。换机后重建工作区联接并重新生成数据即可。
 
 ## 7. 建议的下一步（按优先级）
 

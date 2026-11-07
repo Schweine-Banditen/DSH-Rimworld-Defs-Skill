@@ -45,23 +45,51 @@ RimWorld 1.7（原版 + 官方 DLC）的 **Def 静态查看器**：
 ```
 
 - 安装/更新后**刷新页面**（客户端 bundle 不会自动热更，除非同时跑 dev watcher）；
-- `ui/cordis.patch.yml` 是**本机绝对路径**配置：`dataPath`、`gameRoot`、`pythonExe`、`renderScript`、`placeholderPath`、`cacheDir`、`unityPyPath`；
-- 移动仓库或换机后必须改这些路径并重装。
+- **路径不再写在 `ui/cordis.patch.yml` 里**：由 `ui/paths.js` 解析（环境变量 → `rimworld-defs.local.json` → 面板 config → 仓库位置派生）。`dataPath`、`renderScript`、`placeholderPath`、`cacheDir` 全部由仓库位置推出，不需要配置；
+- `gameRoot` 是唯一需要外部信息的项：先自动发现（Steam 注册表 → `libraryfolders.vdf` → 候选目录），失败时用 `RIMWORLD_GAME` 或本机配置；
+- `/meta` 的 `paths` 会列出每条路径的 `source`（`env` / `local-config` / `derived` / `steam` / `data-file`）与 `valid`，迁移后先看它；
+- 换机流程：`git clone` → `python scripts/extract_defs.py` → 重建工作区联接（见 §4.1）→ 重装/刷新面板。
+
+### 4.1 Skill 发现：工作区联接（不装 bundle、不改全局 profile）
+
+本项目有两半：**面板**由 `ui/` bundle 提供；**`SKILL.md`（给模型的操作手册）**由 DSH 的 filesystem skill 提供方扫描目录发现。后者不需要安装，但必须放在 DSH 会扫描的位置。
+
+本机采用「工作区联接」：只在**当前工作目录**生效，不改全局 profile。
+
+```powershell
+# 建（每台主机 / 每个工作目录一次；同盘、无需管理员权限）
+New-Item -ItemType Junction `
+  -Path 'E:\DataE\game\Rimworld_mod\.dsh\skills\RimWorld_Mod' `
+  -Target 'E:\DataE\condex_file\git_repository\RimWorld_Mod'
+```
+
+- DSH 扫描 `<项目根>/.dsh/skills`；项目根 = 最近的含 `.git` 的祖先目录，没有则是会话的当前工作目录；
+- **必须与仓库同盘**（本机都在 `E:`）。跨盘只能改用目录符号链接，需要管理员或开发者模式；
+- 发现是**即时**的：建好联接后下一轮对话就能在技能目录里看到 `rimworld-defs-viewer`，**无需重启**；
+- 删除：`cmd /c rmdir "E:\DataE\game\Rimworld_mod\.dsh\skills\RimWorld_Mod"`（只删链接，不碰仓库内容）；
+- 该目录（`.dsh/`）不属于本仓库，也不进 git。
+
+为什么不用全局配置：改 `~/.dsh/profiles/<profile>/cordis.patch.yml` 的 `customSkillDirs` 也能生效，但那是**进程级**配置，会影响该 profile 下所有会话；本仓库只需要服务固定工作目录，故用会话级的项目根。
 
 ## 5. 数据更新流程
 
 游戏更新后：
 
 ```bash
+# 0) 先看路径解析结果（游戏目录/数据/解释器各来自哪里、是否存在）
+python scripts/paths.py --json
+
 # 1) 检查数据是否过期（0=一致，1=需重建，2=路径错误）
-python scripts/extract_defs.py --game "E:\SteamLibrary\steamapps\common\RimWorld" --check
+python scripts/extract_defs.py --check
 
 # 2) 重建（约 2.4 s，原子写入；自动对比上一份并写 changes）
-python scripts/extract_defs.py --game "E:\SteamLibrary\steamapps\common\RimWorld"
+python scripts/extract_defs.py
 
-# 3) 抽样校验（可选，但建议）
-python scripts/verify_defs.py --json data/rimworld-defs.json --game "E:\SteamLibrary\steamapps\common\RimWorld" --samples 100
+# 3) 抽样校验（可选，但建议；路径同样自动解析）
+python scripts/verify_defs.py --samples 100
 ```
+
+- 游戏目录**自动发现**：`--game` / `RIMWORLD_GAME` → `rimworld-defs.local.json` → 数据文件记录 → Steam（注册表 + `libraryfolders.vdf`）；三个脚本都支持省略路径参数；
 
 - 数据文件 `data/rimworld-defs.json`（schema 4）与 `data/changes-history.json` 均被 gitignore，不进仓库；
 - **不会自动重建**：UI 只显示“数据过期”，是否更新由人决定（版本变化可能是回退）；
@@ -96,9 +124,11 @@ python scripts/query_defs.py list-category --category Item --thing-categories Re
 │   ├── extract_defs.py       # 提取（XML → JSON）
 │   ├── query_defs.py         # 查询层（库 + CLI）
 │   ├── render_icon.py        # 贴图解码（Assets.zip / DLC AssetBundles）
+│   ├── paths.py              # 本机路径解析（游戏目录/数据/解释器）
 │   └── verify_defs.py        # 抽样校验（测试专用）
 ├── ui/                       # DSH bundle（Host 路由 + Client 面板）
 ├── assets/placeholder.jpg    # 贴图缺失占位
+├── rimworld-defs.local.example.json  # 本机覆盖模板（实际文件 gitignore）
 └── data/                     # 生成数据（gitignore）
 ```
 
@@ -128,6 +158,8 @@ ui/client.js（React 面板：sidebar.panellist + main）
 | Core 物品显示占位图 + 提示 | `Assets.zip` 的 `.split` 贴图格式未解析 | 已知限制；DLC 正常。见 AGENTS.md §6 |
 | DLC 图标不显示 | UnityPy 缺失或 `unityPyPath` 失效 | `pip install UnityPy` 到 `D:\tools\python`，改配置并重装 |
 | 面板不出现 | bundle 未安装 / 页面未刷新 | 重新安装 bundle，刷新页面 |
+| Skill 不出现（面板正常） | 工作区联接缺失、失效或跨盘 | 重建 junction；确认会话 cwd 在该工作区（见 §4.1） |
+| 提示找不到游戏目录 | 非标准安装 / 自动发现失败 | `python scripts/paths.py --json` 看来源，再设 `RIMWORLD_GAME` 或写本机配置 |
 | 数据过期提示 | 游戏版本与数据不一致 | 按 §5 重建；是否重建由人确认 |
 | 搜索无结果 | 该 Def 来自 mod，或数据未包含 DLC | 确认来源；本工具只扫原版 + 官方 DLC |
 | 属性中文没出现 | 翻译未保存 | 设置 → 翻译 → 输入后自动保存；刷新仍生效 |
@@ -153,5 +185,5 @@ ui/client.js（React 面板：sidebar.panellist + main）
 
 - 提交历史：见 `git log --oneline`；最近合并为「材质染色预览 / XML 悬停 / 翻译设置」。
 - 数据：schema 4，14,084 Defs。
-- 已实现：提取、查询层、校验、面板（树/详情/贴图/染色/XML/翻译）、数据变更记录。
+- 已实现：提取、查询层、校验、面板（树/详情/贴图/染色/XML/翻译）、数据变更记录、路径解析（env + 本机配置 + Steam 自动发现）、Skill 发现（工作区联接）。
 - 未实现：Core `.split` 贴图解码、DSH `@tool` 注册、遮罩染色、UI i18n。

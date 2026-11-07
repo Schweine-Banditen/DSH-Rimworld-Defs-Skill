@@ -23,16 +23,30 @@ description: 查询 RimWorld（环世界）原版与官方 DLC 的 Def 定义资
 
 ## 数据与边界
 
-- 数据文件：本 Skill 目录下 `data/rimworld-defs.json`（由 `scripts/extract_defs.py` 生成，gitignore，不入库）。
+- 数据文件：仓库根下 `data/rimworld-defs.json`（由 `scripts/extract_defs.py` 生成，gitignore，不入库）。
 - 只覆盖 `Data/Core` 与官方 DLC（Royalty、Ideology、Biotech、Anomaly、Odyssey，且按目录自动发现）。
 - **静态模板层**：不合并 `ParentName` 的字段；`MayRequire` 只保留原始字符串，不代表“当前一定加载”。
 - `Abstract: true` 的条目是模板，不是运行时 Def；查询默认排除它们。
 
+## 路径与数据位置
+
+本 Skill 的 **Base directory 就是仓库根**：`scripts/`、`assets/`、`data/` 都在其下，正文里的相对路径一律相对仓库根解析，**不需要替换任何占位符**。
+
+| 需要什么 | 解析顺序（自高到低） |
+| --- | --- |
+| 游戏根目录 | `--game` / `RIMWORLD_GAME` → `rimworld-defs.local.json` 的 `gameRoot` → 数据文件里记录的 `gameRoot` → Steam 自动发现（注册表 → `libraryfolders.vdf` → 各库）→ 常见目录兜底 |
+| 数据文件 | `--json` / `RIMWORLD_DATA` → 本机配置 `dataPath` → `data/rimworld-defs.json` |
+| Python 解释器 | `RIMWORLD_PYTHON` → 本机配置 `pythonExe` → PATH 上的 `python` |
+
+- 仓库内**不含任何绝对路径**；本机差异只放在 `rimworld-defs.local.json`（gitignore）或环境变量里。
+- 自检：`python scripts/paths.py --json` 打印每个路径的来源（`env` / `local-config` / `steam` / `derived`）与是否存在；迁移后先用它定位问题。
+- 数据文件是**本机生成物**：换机器后重新生成一次，不要从旧机器复制——旧文件内嵌旧的 `gameRoot`，会让 `notice` 变成 `unknown`。
+
 ## 查询方式
 
-### 优先：Skill 工具
+### 工具：尚未接入（当前请用命令行）
 
-若接入层已注册以下工具，直接调用：
+下面四个工具是目标形态，**尚未注册到会话**（见 `AGENTS.md` §7.2）。现在一律执行下一节的命令行；工具接入后参数与语义保持不变。
 
 | 工具 | 参数 | 用途 |
 | --- | --- | --- |
@@ -41,16 +55,16 @@ description: 查询 RimWorld（环世界）原版与官方 DLC 的 Def 定义资
 | `list_by_source` | `source`、`limit` | 按 DLC/来源列出 |
 | `list_by_category` | `category`、`thingCategories`、`defType`、`limit` | 按分类组合过滤 |
 
-### 回退：命令行
+### 当前可用：命令行
 
-工具不可用时，在工作区执行（把 `<skill-dir>` 换成本 Skill 目录）：
+在仓库根目录（即 Base directory）执行：
 
 ```bash
-python <skill-dir>/scripts/query_defs.py search-def Steel
-python <skill-dir>/scripts/query_defs.py search-def Otter --def-type PawnKindDef
-python <skill-dir>/scripts/query_defs.py search-label 钢 --limit 10
-python <skill-dir>/scripts/query_defs.py list-source Odyssey --limit 20
-python <skill-dir>/scripts/query_defs.py list-category --category Item --thing-categories ResourcesRaw --def-type ThingDef
+python scripts/query_defs.py search-def Steel
+python scripts/query_defs.py search-def Otter --def-type PawnKindDef
+python scripts/query_defs.py search-label 钢 --limit 10
+python scripts/query_defs.py list-source Odyssey --limit 20
+python scripts/query_defs.py list-category --category Item --thing-categories ResourcesRaw --def-type ThingDef
 ```
 
 命令输出 JSON：`{ "notice": {...}, "count": n, "results": [...] }`。用 `--output <file>` 写文件再读取，避免 Windows 管道编码问题。
@@ -64,6 +78,8 @@ search_def("Gun_Revolver") → 若无结果，说明拼写错误或该 Def 来�
 有结果时看 defType、source（Core/DLC）、sourcePath。
 ```
 
+CLI：`python scripts/query_defs.py search-def Gun_Revolver`
+
 **2. 写 ``<PatchOperationReplace>`` 前确认父级**
 
 ```
@@ -71,11 +87,15 @@ search_def("Apparel_PowerArmor") → 看 parentChain 与 parentResolved；
 parentResolved 为 false 时不要假设字段齐全。
 ```
 
+CLI：`python scripts/query_defs.py search-def Apparel_PowerArmor`
+
 **3. 查分类（写 recipe 的 thingCategories、筛选建筑）**
 
 ```
 list_by_category(defType="ThingDef", thingCategories=["ResourcesRaw"])
 ```
+
+CLI：`python scripts/query_defs.py list-category --category Item --thing-categories ResourcesRaw --def-type ThingDef`
 
 注意：`category` 常写在抽象基类上，工具返回的 `categoryDepth`/`categoryFrom` 表示继承来源；`category` 与 `thingCategories` 是两个维度，不能互相替代。
 
@@ -85,6 +105,8 @@ list_by_category(defType="ThingDef", thingCategories=["ResourcesRaw"])
 search_by_label("钢") / search_by_label("steel")
 ```
 
+CLI：`python scripts/query_defs.py search-label 钢 --limit 10`
+
 结果里的 `matchedField` 告诉你命中的是 `label`、`labelZh`、`title` 还是 `defName`。
 
 **5. 查贴图路径**
@@ -93,6 +115,8 @@ search_by_label("钢") / search_by_label("steel")
 search_def("Steel") → graphic.effective.texPath
 ```
 
+CLI：`python scripts/query_defs.py search-def Steel --def-type ThingDef`
+
 `effective` 是沿父链解析出的有效贴图；`own: false` 表示图来自祖先。贴图文件在游戏根目录 `Assets.zip`，不在 `data/` 里。
 
 **6. 判断内容是否来自 DLC**
@@ -100,6 +124,8 @@ search_def("Steel") → graphic.effective.texPath
 ```
 list_by_source("Royalty") / 看 def 的 source 与 MayRequire
 ```
+
+CLI：`python scripts/query_defs.py list-source Royalty --limit 20`
 
 `source` 严格按文件路径判定；`MayRequire` 只是原始条件。
 
@@ -123,7 +149,7 @@ list_by_source("Royalty") / 看 def 的 source 与 MayRequire
 
 `stale` 时用 `ask_user_question` 询问，选项建议：
 
-1. 立即重建（运行 `python <skill-dir>/scripts/extract_defs.py --game "<RimWorld 根目录>"`，约 1–2 秒）；
+1. 立即重建（在仓库根运行 `python scripts/extract_defs.py`，约 2 秒；游戏目录自动发现，非标准安装时加 `--game` 或设 `RIMWORLD_GAME`）；
 2. 本次保持旧数据（只在本次运行内不再提示）；
 3. 以后都保持旧数据（直到用户主动解除）。
 

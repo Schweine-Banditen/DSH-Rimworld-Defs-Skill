@@ -11,13 +11,15 @@
 ## 使用
 
 ```bash
-python scripts/verify_defs.py --json data/rimworld-defs.json --game "<RimWorld 根目录>"
+python scripts/verify_defs.py                       # 全部走自动解析
+python scripts/verify_defs.py --samples 200 --seed 20261107
+python scripts/verify_defs.py --json <file> --game "<RimWorld 根目录>"   # 显式覆盖
 ```
 
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
-| `--json FILE` | 必填 | 要校验的数据文件 |
-| `--game DIR` | 必填 | 游戏根目录（与生成数据时使用的一致） |
+| `--json FILE` | 自动解析 | 要校验的数据文件；依次取 `RIMWORLD_DATA` → `rimworld-defs.local.json` → `<仓库根>/data/rimworld-defs.json` |
+| `--game DIR` | 自动解析 | 游戏根目录；依次取 `RIMWORLD_GAME` → 本机配置 → 数据文件记录的 `gameRoot` → Steam 自动发现 |
 | `--samples N` | 100 | 抽样条数 |
 | `--seed N` | 20261106 | 随机种子；改动后用同一种子可复现 |
 | `--language NAME` | `ChineseSimplified (简体中文)` | 校验中文标签时使用的语言目录 |

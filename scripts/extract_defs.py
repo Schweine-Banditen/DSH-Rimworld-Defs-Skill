@@ -28,6 +28,12 @@ from typing import Any, Iterator
 
 from lxml import etree
 
+# 同一目录下的 paths 模块：既支持 `python scripts/extract_defs.py`（sys.path 已含
+# scripts/），也支持 `import extract_defs`（此时 sys.path[0] 可能不是本目录）。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import paths  # noqa: E402 - 导入位置取决于上面的 sys.path 处理
+
 # 输出 JSON 的结构版本。字段含义变化（不是新增字段）时递增，
 # Skill 侧据此判断能否读取。
 SCHEMA_VERSION = 4
@@ -79,9 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--game",
-        required=True,
+        default=None,
         metavar="DIR",
-        help="游戏根目录（其下应存在 Data/Core/Defs）",
+        help="游戏根目录（其下应存在 Data/Core/Defs）。"
+        "留空时依次尝试环境变量 RIMWORLD_GAME、rimworld-defs.local.json、"
+        "已有数据文件记录的 gameRoot、Steam 自动发现",
     )
     parser.add_argument(
         "--output",
@@ -115,8 +123,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def default_output_path() -> Path:
-    """默认输出路径：仓库 data/rimworld-defs.json（基于脚本自身定位）。"""
-    return Path(__file__).resolve().parent.parent / "data" / "rimworld-defs.json"
+    """默认输出路径：RIMWORLD_DATA → 本机配置 → 仓库 ``data/rimworld-defs.json``。"""
+    return paths.data_path()
 
 
 def read_game_version(game_root: Path) -> str | None:
@@ -1024,17 +1032,21 @@ def resolve_fields(defs: list[dict[str, Any]]) -> dict[str, int]:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
-    game_root = Path(args.game).expanduser().resolve()
-    if not (game_root / "Data" / "Core" / "Defs").is_dir():
-        print(
-            f"错误：{game_root} 下找不到 Data/Core/Defs，请用 --game 指向 RimWorld 根目录",
-            file=sys.stderr,
-        )
-        return 2
-
+    game_root = Path(args.game).expanduser().resolve() if args.game else None
     output_path = (
         Path(args.output).expanduser().resolve() if args.output else default_output_path()
     )
+
+    resolved_root, game_source = paths.game_root(game_root, output_path)
+    if resolved_root is None:
+        print(
+            "错误：找不到 RimWorld 根目录（其下应存在 Data/Core/Defs）。"
+            "请用 --game 指定，或设置环境变量 RIMWORLD_GAME，"
+            f"或在 {paths.local_config_path()} 中写入 gameRoot。",
+            file=sys.stderr,
+        )
+        return 2
+    game_root = resolved_root
 
     if args.check:
         return check_up_to_date(output_path, game_root)
@@ -1106,7 +1118,7 @@ def main(argv: list[str] | None = None) -> int:
 
     summary = changes["summary"]
     size_mb = output_path.stat().st_size / (1024 * 1024)
-    print(f"扫描目录: {game_root}")
+    print(f"扫描目录: {game_root}（来源 {game_source}）")
     print(f"游戏版本: {game_version or '(未知)'}")
     print(f"输出文件: {output_path} ({size_mb:.1f} MB)")
     if changes["firstBuild"]:
