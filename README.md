@@ -288,14 +288,19 @@ python scripts/query_defs.py list-category --category Item --thing-categories Re
 
 ## 智能体工具
 
-面板 Host 半在启动时向 DSH 注册四个工具，会话里可直接调用（与 CLI 语义一致，内部调用 `scripts/query_defs.py`）：
+面板 Host 半在启动时向 DSH 注册五个工具，会话里可直接调用（与 CLI 语义一致，内部调用 `scripts/query_defs.py`；初始化工具调用 `scripts/init.py`）：
 
 | 工具 | 参数 | 用途 |
 | --- | --- | --- |
-| `rimworld_search_def` | `defName`、可选 `defType`、`includeAbstract` | 精确查 defName（或模板 Name） |
-| `rimworld_search_by_label` | `query`、`limit` | 中英文关键词模糊搜索 |
-| `rimworld_list_by_source` | `source`、`limit` | 按来源列出 |
-| `rimworld_list_by_category` | `category`、`thingCategories`、`defType`、`limit` | 按分类组合过滤 |
+| `rimworld_search_def` | `defName`、可选 `defType`、`includeAbstract`、`scope` | 精确查 defName（或模板 Name） |
+| `rimworld_search_by_label` | `query`、`limit`、`scope` | 中英文关键词模糊搜索 |
+| `rimworld_list_by_source` | `source`、`limit`、`scope` | 按来源列出 |
+| `rimworld_list_by_category` | `category`、`thingCategories`、`defType`、`limit`、`scope` | 按分类组合过滤 |
+| `rimworld_init` | 可选 `force`、`workspace`、`link` | 初始化/自检：路径、依赖、生成数据、Skill 联接 |
+
+`scope`：`g`=仅本体与 DLC，`c`=仅创意工坊，`m`=仅我的模组，留空=全部。
+
+首次安装或换机时，先跑 `python scripts/init.py`（或调用 `rimworld_init`）：它检查游戏目录与依赖，数据缺失时自动生成，`--workspace` + `--link` 可创建 Skill 目录联接。
 
 面板「设置 → 智能体工具」只读列出这些工具的说明与注册状态，不需要配置。
 

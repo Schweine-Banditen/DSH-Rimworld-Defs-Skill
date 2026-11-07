@@ -109,7 +109,7 @@ python scripts/render_icon.py --game "<根>" --source Royalty --tex "Things/Pawn
 1. **Core 贴图无法解码**：`Assets.zip` 里 3,404 个 `.split` 是自定义容器（DDS 头 + 约 1.108 倍的表/索引数据），Pillow / texture2ddecoder / imagecodecs 全部解出噪声；UI 对 Core 显示占位图与提示。DLC（Unity 资源包）解码正常。**不要**用通用 DDS 解码器“修复”它。
 2. **染色是预览**：用 CSS `mix-blend-mode: multiply` 叠色，不是游戏真实材质染色算法。
 3. **UnityPy 是临时安装**：位于工作区的 `out/unitypy`，由本机配置 `unityPyPath` 指向（不写进 bundle）。换机或清理工作区后 DLC 图标会失效；正确做法是 `pip install UnityPy` 到 `python` 所在环境，并删掉该配置项。
-4. **工具由面板注册，不是独立包**：`ui/tools.js` 在面板 `apply()` 里通过作用域 `ctx.inject(['tools'])` 注册四个工具；缺 `tools` 服务（headless）时跳过，面板照常工作。工具只调用 `scripts/query_defs.py`，不重写查询逻辑。
+4. **工具由面板注册，不是独立包**：`ui/tools.js` 在面板 `apply()` 里通过作用域 `ctx.inject(['tools'])` 注册五个工具（四个查询 + 初始化）；缺 `tools` 服务（headless）时跳过，面板照常工作。查询只调用 `scripts/query_defs.py`、初始化调用 `scripts/init.py`，不重写逻辑。
 5. **遮罩类贴图**（护甲、部分服装）是灰度图，游戏运行时染色；静态显示为灰色剪影。
 6. 路径**不写在** `ui/cordis.patch.yml`：`ui/paths.js` 从包位置派生 `dataPath` / `renderScript` / `placeholderPath` / `cacheDir`，游戏目录靠 Steam 自动发现；本机差异放 `rimworld-defs.local.json` 或环境变量。换机后重建工作区联接并重新生成数据即可。
 

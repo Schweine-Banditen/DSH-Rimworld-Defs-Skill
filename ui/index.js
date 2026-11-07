@@ -168,17 +168,40 @@ export function apply(ctx, config = {}) {
     writeFileSync(workshopStatePath, `${JSON.stringify(state, null, 2)}\n`, 'utf8')
   }
 
-  /** 跑一次 Python 脚本并返回 stdout；失败时把 stderr 原文抛出来。 */
+  /** 跑一次 Python 脚本并返回 stdout；失败时把 stderr 原文抛出来。
+   *  配置的解释器缺失时依次回退 python3 / py -3。 */
   function runPython(args, timeoutMs) {
+    // Windows 的 python3 常是 Store 占位符（exit 9009），回退用 py 启动器。
+    const candidates = [pythonExe, ...(process.platform === 'win32' ? ['py'] : ['python3'])]
+    const unique = candidates.filter((item, index) => item && candidates.indexOf(item) === index)
+    return runPythonWith(unique, args, timeoutMs)
+  }
+
+  async function runPythonWith(candidates, args, timeoutMs) {
+    for (const exe of candidates) {
+      try {
+        return await execPython(exe, args, timeoutMs)
+      } catch (error) {
+        if (error.notFound) continue
+        throw error
+      }
+    }
+    throw new Error(`找不到可用的 Python 解释器（已尝试：${candidates.join('、')}）`)
+  }
+
+  function execPython(exe, args, timeoutMs) {
+    const prefix = exe === 'py' ? ['-3'] : []
     return new Promise((resolve, reject) => {
       execFile(
-        pythonExe,
-        args,
+        exe,
+        [...prefix, ...args],
         { windowsHide: true, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8' },
         (error, stdout, stderr) => {
           if (error) {
-            if (error.code === 'ENOENT') {
-              reject(new Error(`找不到 Python 解释器「${pythonExe}」`))
+            if (error.code === 'ENOENT' || error.code === 9009) {
+              const notFound = new Error(`找不到 Python 解释器「${exe}」`)
+              notFound.notFound = true
+              reject(notFound)
               return
             }
             reject(new Error(String(stderr || '').trim() || error.message))

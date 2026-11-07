@@ -121,6 +121,28 @@ const DEFINITIONS = [
       ...(a.scope ? ['--scope', a.scope] : []),
     ],
   },
+  {
+    name: 'rimworld_init',
+    title: '初始化 / 自检',
+    summary: '检查环境、生成数据、验证查询，可选建立 Skill 联接',
+    description:
+      '首次安装、换机或数据缺失/过期时先调用。依次检查游戏目录、Python 依赖（lxml/Pillow）、数据文件；缺失或 force=true 时重新生成；返回路径、依赖版本、defs 数量、执行的动作与告警。提供 workspace 时检查其 .dsh/skills 是否已链接本技能，link=true 则在缺失时创建目录联接。' +
+      '该工具幂等，可重复调用。',
+    usage: 'rimworld_init({ workspace: "E:\\\\MyWorkspace", link: true })',
+    script: 'init.py',
+    timeoutMs: 600_000,
+    params: [
+      { key: 'force', type: 'boolean', description: '即使数据已存在也重新生成' },
+      { key: 'workspace', type: 'string', description: '会话工作目录；提供后检查其 .dsh/skills 是否已链接本技能' },
+      { key: 'link', type: 'boolean', description: '与 workspace 搭配：缺失时创建目录联接（Windows junction / 符号链接）' },
+    ],
+    toArgs: (a) => [
+      '--json',
+      ...(a.force ? ['--force'] : []),
+      ...(a.workspace ? ['--workspace', a.workspace] : []),
+      ...(a.link ? ['--link'] : []),
+    ],
+  },
 ]
 
 /** 面板设置页展示用的元数据（不含执行逻辑，可安全序列化成 JSON）。 */
@@ -198,10 +220,16 @@ export function createTools(options = {}) {
         return [{ type: 'text', text: JSON.stringify(value, null, 2) }]
       },
     },
-    timeoutMs: 45_000,
+    timeoutMs: definition.timeoutMs || 45_000,
     async execute(args) {
       const normalized = normalizeArgs(definition, args)
-      return runQuery({ pythonExe, script, args: definition.toArgs(normalized) })
+      const target = definition.script ? join(REPO_ROOT, 'scripts', definition.script) : script
+      return runQuery({
+        pythonExe,
+        script: target,
+        args: definition.toArgs(normalized),
+        timeoutMs: definition.timeoutMs || 45_000,
+      })
     },
   }))
 }
