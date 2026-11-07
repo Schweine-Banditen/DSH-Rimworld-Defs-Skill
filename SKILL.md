@@ -1,6 +1,7 @@
 ---
 name: rimworld-defs-viewer
 description: 查询 RimWorld（环世界）原版与官方 DLC 的 Def 定义资料，辅助编写模组 XML：确认 defName 是否存在、由哪个 DLC 定义、label 中英文、category/thingCategories、ParentName 继承链、MayRequire 条件与贴图引用。只返回 XML 模板层信息，不返回游戏运行时合并后的最终值。
+whenToUse: 用户要求安装、配置、迁移或初始化本技能时；或写 RimWorld 模组需要查 Def 资料时。
 ---
 
 # RimWorld Defs 查看器
@@ -42,20 +43,33 @@ description: 查询 RimWorld（环世界）原版与官方 DLC 的 Def 定义资
 - 自检：`python scripts/paths.py --json` 打印每个路径的来源（`env` / `local-config` / `steam` / `derived`）与是否存在；迁移后先用它定位问题。
 - 数据文件是**本机生成物**：换机器后重新生成一次，不要从旧机器复制——旧文件内嵌旧的 `gameRoot`，会让 `notice` 变成 `unknown`。
 
+## 初始化（自动配置 / 首次安装）
+
+用户要求「配置 / 安装这个 Skill」时，按顺序执行并逐步验证：
+
+1. **环境**：Python ≥ 3.13（读 `Assets.zip` 的 ZSTD 需要）；`pip install lxml pillow`；需要 DLC 贴图时再 `pip install UnityPy`。
+2. **生成数据**：仓库根执行 `python scripts/extract_defs.py`（游戏目录自动发现；找不到时设 `RIMWORLD_GAME` 或写 `rimworld-defs.local.json`）。
+3. **自检**：`python scripts/paths.py --json`，确认 `gameRoot.valid` 与 `data.exists` 均为 `true`。
+4. **接入面板**：用 DSH 的 `plugin_manager install_bundle` 指向 `<repo>/ui`，然后刷新页面；`/rimworld-defs/api/meta` 返回 200 即成功（该步会改动 profile 全局状态，先征得用户同意）。
+5. **让 DSH 发现本 Skill**：在会话工作目录建目录联接 `<workspace>/.dsh/skills/rimworld-defs-viewer` → 仓库根（同盘、免管理员）；下一轮对话就能在技能目录里看到它。
+6. **验证**：`python scripts/query_defs.py search-def Steel` 有结果；面板能显示 def；`rimworld_search_def` 工具可调用。
+
+路径优先级、跨盘限制与排障见仓库 `docs/manual.md` §4。
+
 ## 查询方式
 
-### 工具：尚未接入（当前请用命令行）
+### 优先：智能体工具（已由面板注册）
 
-下面四个工具是目标形态，**尚未注册到会话**（见 `AGENTS.md` §7.2）。现在一律执行下一节的命令行；工具接入后参数与语义保持不变。
+面板插件启动时注册了下面四个工具，会话里直接调用即可；它们内部调用 `scripts/query_defs.py`，语义与命令行完全一致。
 
 | 工具 | 参数 | 用途 |
 | --- | --- | --- |
-| `search_def` | `defName`、可选 `defType`、`includeAbstract` | 精确查 defName（或模板 Name） |
-| `search_by_label` | `query`、`limit` | 中英文关键词模糊搜索 |
-| `list_by_source` | `source`、`limit` | 按 DLC/来源列出 |
-| `list_by_category` | `category`、`thingCategories`、`defType`、`limit` | 按分类组合过滤 |
+| `rimworld_search_def` | `defName`、可选 `defType`、`includeAbstract` | 精确查 defName（或模板 Name） |
+| `rimworld_search_by_label` | `query`、`limit` | 中英文关键词模糊搜索 |
+| `rimworld_list_by_source` | `source`、`limit` | 按 DLC/来源列出 |
+| `rimworld_list_by_category` | `category`、`thingCategories`、`defType`、`limit` | 按分类组合过滤 |
 
-### 当前可用：命令行
+### 回退：命令行
 
 在仓库根目录（即 Base directory）执行：
 
@@ -74,7 +88,7 @@ python scripts/query_defs.py list-category --category Item --thing-categories Re
 **1. 确认 defName 是否存在、由谁定义**
 
 ```
-search_def("Gun_Revolver") → 若无结果，说明拼写错误或该 Def 来自未扫描的模组；
+rimworld_search_def("Gun_Revolver") → 若无结果，说明拼写错误或该 Def 来自未扫描的模组；
 有结果时看 defType、source（Core/DLC）、sourcePath。
 ```
 
@@ -83,7 +97,7 @@ CLI：`python scripts/query_defs.py search-def Gun_Revolver`
 **2. 写 ``<PatchOperationReplace>`` 前确认父级**
 
 ```
-search_def("Apparel_PowerArmor") → 看 parentChain 与 parentResolved；
+rimworld_search_def("Apparel_PowerArmor") → 看 parentChain 与 parentResolved；
 parentResolved 为 false 时不要假设字段齐全。
 ```
 
@@ -92,7 +106,7 @@ CLI：`python scripts/query_defs.py search-def Apparel_PowerArmor`
 **3. 查分类（写 recipe 的 thingCategories、筛选建筑）**
 
 ```
-list_by_category(defType="ThingDef", thingCategories=["ResourcesRaw"])
+rimworld_list_by_category(defType="ThingDef", thingCategories=["ResourcesRaw"])
 ```
 
 CLI：`python scripts/query_defs.py list-category --category Item --thing-categories ResourcesRaw --def-type ThingDef`
@@ -102,7 +116,7 @@ CLI：`python scripts/query_defs.py list-category --category Item --thing-catego
 **4. 查中英文显示名**
 
 ```
-search_by_label("钢") / search_by_label("steel")
+rimworld_search_by_label("钢") / rimworld_search_by_label("steel")
 ```
 
 CLI：`python scripts/query_defs.py search-label 钢 --limit 10`
@@ -112,7 +126,7 @@ CLI：`python scripts/query_defs.py search-label 钢 --limit 10`
 **5. 查贴图路径**
 
 ```
-search_def("Steel") → graphic.effective.texPath
+rimworld_search_def("Steel") → graphic.effective.texPath
 ```
 
 CLI：`python scripts/query_defs.py search-def Steel --def-type ThingDef`
@@ -122,7 +136,7 @@ CLI：`python scripts/query_defs.py search-def Steel --def-type ThingDef`
 **6. 判断内容是否来自 DLC**
 
 ```
-list_by_source("Royalty") / 看 def 的 source 与 MayRequire
+rimworld_list_by_source("Royalty") / 看 def 的 source 与 MayRequire
 ```
 
 CLI：`python scripts/query_defs.py list-source Royalty --limit 20`

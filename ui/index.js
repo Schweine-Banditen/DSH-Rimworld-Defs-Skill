@@ -9,6 +9,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { resolve as resolvePath, sep } from 'node:path'
 import { resolvePaths } from './paths.js'
+import { TOOL_CATALOG, createTools } from './tools.js'
 
 export const name = 'rimworld-defs-ui'
 
@@ -141,6 +142,25 @@ export function apply(ctx, config = {}) {
     ctx.logger?.warn?.(
       'rimworld-defs: 未找到 RimWorld 目录，版本提示与 XML 预览不可用；可设 RIMWORLD_GAME 或写 rimworld-defs.local.json',
     )
+  }
+
+  // 智能体工具：注册四个查询。用作用域 inject 而不是顶层 inject —— 缺少 tools
+  // 服务的环境（headless / 精简 profile）不应该连面板路由一起消失。
+  const registeredTools = []
+  if (typeof ctx.inject === 'function') {
+    ctx.inject(['tools'], (scope) => {
+      for (const tool of createTools({ pythonExe })) {
+        try {
+          scope.tools.register(tool)
+          registeredTools.push(tool.name)
+        } catch (error) {
+          ctx.logger?.warn?.(`rimworld-defs: 工具 ${tool.name} 注册失败：${error}`)
+        }
+      }
+      ctx.logger?.info?.(`rimworld-defs: 已注册 ${registeredTools.length} 个智能体工具`)
+    })
+  } else {
+    ctx.logger?.warn?.('rimworld-defs: ctx.inject 不可用，跳过智能体工具注册')
   }
 
   let cache = { mtimeMs: 0, payload: null, index: null, lookup: null }
@@ -397,6 +417,9 @@ export function apply(ctx, config = {}) {
         for (const name of record.thingCategories || []) keys.add(name)
       }
       return json({ keys: [...keys].sort((a, b) => a.localeCompare(b)) })
+    }
+    if (path === `${API_PREFIX}/tools`) {
+      return json({ tools: TOOL_CATALOG, registered: registeredTools })
     }
     if (path === `${API_PREFIX}/xml`) {
       const rel = url.searchParams.get('path') || ''

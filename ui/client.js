@@ -8,7 +8,7 @@ window.__ModuleLoader__.load({
   id: '@local/dsh-rimworld-defs',
   factory(require) {
     const React = require('react')
-    const { useState, useEffect, useCallback } = React
+    const { useState, useEffect, useCallback, useRef } = React
     const h = React.createElement
 
     const API = '/rimworld-defs/api'
@@ -266,6 +266,14 @@ window.__ModuleLoader__.load({
       table: { width: '100%', borderCollapse: 'collapse', fontSize: 12.5 },
       th: { textAlign: 'left', color: 'var(--dsw-alias-label-secondary)', fontWeight: 600, padding: '6px 8px', borderBottom: '1px solid var(--dsw-alias-border-l2)' },
       td: { padding: '4px 8px', borderBottom: '1px solid var(--dsw-alias-border-l1)', verticalAlign: 'middle' },
+      toolCard: { border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 8, padding: '12px 14px', marginBottom: 12 },
+      toolHead: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 },
+      toolName: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13, fontWeight: 600 },
+      toolBadge: { marginLeft: 'auto', fontSize: 11.5, padding: '1px 7px', borderRadius: 999, color: 'var(--dsw-alias-brand-primary)', border: '1px solid var(--dsw-alias-brand-primary)' },
+      toolBadgeOff: { marginLeft: 'auto', fontSize: 11.5, padding: '1px 7px', borderRadius: 999, color: 'var(--dsw-alias-label-secondary)', border: '1px solid var(--dsw-alias-border-l2)' },
+      toolTitle: { fontSize: 12.5, fontWeight: 600, marginBottom: 2 },
+      toolDesc: { fontSize: 12.5, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.6, marginBottom: 6 },
+      toolUsage: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, background: 'var(--dsw-alias-bg-layer-1)', padding: '6px 8px', borderRadius: 6, marginBottom: 8, overflowX: 'auto' },
       input: {
         width: '100%',
         padding: '4px 8px',
@@ -323,77 +331,159 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /** 展开/收起的时长与缓动：180ms 足够跟手，再长就会显得拖沓。 */
+    const COLLAPSE_MS =
+      typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ? 0
+        : 180
+    const COLLAPSE_EASE = 'cubic-bezier(0.2, 0.7, 0.3, 1)'
+
+    /**
+     * 文件树的高度过渡容器。
+     *
+     * 用 `grid-template-rows: 0fr ↔ 1fr` 而不是测量像素高度：分组里还有「显示更多」
+     * 分页按钮，内容高度会变，量出来的 px 迟早过期。
+     *
+     * 卸载策略：收起时先动画到 0fr，等过渡结束再卸载子树，避免收起后还挂着几百行
+     * DOM；展开时先以 0fr 挂载、下一帧再切到 1fr，这样首帧就有可插值的起点。
+     */
+    function Collapse({ open, children }) {
+      const [mounted, setMounted] = useState(open)
+      const [shown, setShown] = useState(open)
+      const mountedRef = useRef(open)
+
+      useEffect(() => {
+        mountedRef.current = mounted
+      }, [mounted])
+
+      useEffect(() => {
+        let first = 0
+        let second = 0
+        let timer = 0
+        if (open) {
+          if (mountedRef.current) {
+            setShown(true)
+          } else {
+            setMounted(true)
+            setShown(false)
+            first = requestAnimationFrame(() => {
+              second = requestAnimationFrame(() => setShown(true))
+            })
+          }
+        } else {
+          setShown(false)
+          if (COLLAPSE_MS === 0) setMounted(false)
+          else timer = setTimeout(() => setMounted(false), COLLAPSE_MS + 40)
+        }
+        return () => {
+          if (first) cancelAnimationFrame(first)
+          if (second) cancelAnimationFrame(second)
+          if (timer) clearTimeout(timer)
+        }
+      }, [open])
+
+      if (!mounted) return null
+      return h(
+        'div',
+        {
+          style: {
+            display: 'grid',
+            gridTemplateRows: shown ? '1fr' : '0fr',
+            transition: COLLAPSE_MS === 0 ? undefined : `grid-template-rows ${COLLAPSE_MS}ms ${COLLAPSE_EASE}`,
+          },
+          'aria-hidden': open ? undefined : 'true',
+        },
+        h(
+          'div',
+          {
+            style: {
+              overflow: 'hidden',
+              minHeight: 0,
+              opacity: shown ? 1 : 0,
+              transition: COLLAPSE_MS === 0 ? undefined : `opacity ${COLLAPSE_MS}ms ${COLLAPSE_EASE}`,
+            },
+          },
+          typeof children === 'function' ? children() : children,
+        ),
+      )
+    }
+
     function Explorer({ sources, expanded, toggle, selectedKey, onSelect }) {
       const [limits, setLimits] = useState({})
-      const rows = []
       const PAGE = 250
-      for (const source of sources) {
-        const sourceKey = source.name
-        const sourceOpen = !!expanded[sourceKey]
-        rows.push(
-          h(TreeRow, {
-            key: `s:${sourceKey}`,
-            depth: 0,
-            label: sourceKey,
-            count: source.count,
-            open: sourceOpen,
-            onClick: () => toggle(sourceKey),
-          }),
-        )
-        if (!sourceOpen) continue
-        for (const group of source.groups) {
-          const groupKey = `${sourceKey}::${group.key}`
-          const groupOpen = !!expanded[groupKey]
-          rows.push(
+
+      return h(
+        'div',
+        { style: styles.tree, role: 'tree' },
+        sources.map((source) => {
+          const sourceKey = source.name
+          const sourceOpen = !!expanded[sourceKey]
+          return h(
+            'div',
+            { key: `s:${sourceKey}` },
             h(TreeRow, {
-              key: `g:${groupKey}`,
-              depth: 1,
-              label: group.label,
-              count: group.count,
-              open: groupOpen,
-              onClick: () => toggle(groupKey),
+              depth: 0,
+              label: sourceKey,
+              count: source.count,
+              open: sourceOpen,
+              onClick: () => toggle(sourceKey),
             }),
-          )
-          if (!groupOpen) continue
-          const shown = limits[groupKey] || PAGE
-          const selectedIndex = group.items.findIndex(
-            (item) => `${sourceKey}:${item.defType}:${item.defName}` === selectedKey,
-          )
-          const cutoff = selectedIndex >= 0 ? Math.max(shown, selectedIndex + 1) : shown
-          const visible = group.items.slice(0, cutoff)
-          for (const item of visible) {
-            const key = `${sourceKey}:${item.defType}:${item.defName}`
-            rows.push(
-              h(TreeRow, {
-                key: `d:${key}`,
-                depth: 2,
-                label: zhOf(item.label) || item.label || item.defName,
-                sub: item.defType,
-                open: undefined,
-                selected: selectedKey === key,
-                flash: selectedKey === key,
-                onClick: () => onSelect(item, sourceKey),
+            h(Collapse, { open: sourceOpen }, () =>
+              source.groups.map((group) => {
+                const groupKey = `${sourceKey}::${group.key}`
+                const groupOpen = !!expanded[groupKey]
+                return h(
+                  'div',
+                  { key: `g:${groupKey}` },
+                  h(TreeRow, {
+                    depth: 1,
+                    label: group.label,
+                    count: group.count,
+                    open: groupOpen,
+                    onClick: () => toggle(groupKey),
+                  }),
+                  h(Collapse, { open: groupOpen }, () => {
+                    const shown = limits[groupKey] || PAGE
+                    const selectedIndex = group.items.findIndex(
+                      (item) => `${sourceKey}:${item.defType}:${item.defName}` === selectedKey,
+                    )
+                    const cutoff = selectedIndex >= 0 ? Math.max(shown, selectedIndex + 1) : shown
+                    const visible = group.items.slice(0, cutoff)
+                    const rows = visible.map((item) => {
+                      const key = `${sourceKey}:${item.defType}:${item.defName}`
+                      return h(TreeRow, {
+                        key: `d:${key}`,
+                        depth: 2,
+                        label: zhOf(item.label) || item.label || item.defName,
+                        sub: item.defType,
+                        selected: selectedKey === key,
+                        flash: selectedKey === key,
+                        onClick: () => onSelect(item, sourceKey),
+                      })
+                    })
+                    if (group.items.length > visible.length) {
+                      rows.push(
+                        h(
+                          'div',
+                          {
+                            key: `more:${groupKey}`,
+                            className: 'rw-row',
+                            style: { ...styles.row, paddingLeft: 8 + 2 * 14, color: 'var(--dsw-alias-brand-primary)' },
+                            onClick: () => setLimits((prev) => ({ ...prev, [groupKey]: shown + PAGE })),
+                          },
+                          h('span', { style: styles.chevron }, '+'),
+                          h('span', null, `显示更多（剩余 ${group.items.length - visible.length}）`),
+                        ),
+                      )
+                    }
+                    return rows
+                  }),
+                )
               }),
-            )
-          }
-          if (group.items.length > visible.length) {
-            rows.push(
-              h(
-                'div',
-                {
-                  key: `more:${groupKey}`,
-                  className: 'rw-row',
-                  style: { ...styles.row, paddingLeft: 8 + 2 * 14, color: 'var(--dsw-alias-brand-primary)' },
-                  onClick: () => setLimits((prev) => ({ ...prev, [groupKey]: shown + PAGE })),
-                },
-                h('span', { style: styles.chevron }, '+'),
-                h('span', null, `显示更多（剩余 ${group.items.length - visible.length}）`),
-              ),
-            )
-          }
-        }
-      }
-      return h('div', { style: styles.tree, role: 'tree' }, rows)
+            ),
+          )
+        }),
+      )
     }
 
     function Attr({ label, value }) {
@@ -714,18 +804,94 @@ window.__ModuleLoader__.load({
       return `${start > 0 ? '…\n' : ''}${text.slice(start, end)}${end < text.length ? '\n…' : ''}`
     }
 
+    function ToolSettings({ info }) {
+      const tools = (info && info.tools) || []
+      const registered = new Set((info && info.registered) || [])
+      if (info === null) return h('div', { style: styles.empty }, '加载中…')
+      if (tools.length === 0) return h('div', { style: styles.empty }, '面板未提供工具目录。')
+
+      return h(
+        'div',
+        null,
+        h(
+          'div',
+          { style: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 } },
+          h('div', { style: { fontSize: 15, fontWeight: 600 } }, '智能体工具'),
+          h(
+            'span',
+            { style: styles.empty },
+            '无需配置。这些工具由面板插件注册，会话中可直接调用；这里只列出名称、参数与用法。',
+          ),
+        ),
+        tools.map((tool) =>
+          h(
+            'div',
+            { key: tool.name, style: styles.toolCard },
+            h(
+              'div',
+              { style: styles.toolHead },
+              h('code', { style: styles.toolName }, tool.name),
+              h(
+                'span',
+                { style: registered.has(tool.name) ? styles.toolBadge : styles.toolBadgeOff },
+                registered.has(tool.name) ? '已注册' : '未注册',
+              ),
+            ),
+            h('div', { style: styles.toolTitle }, `${tool.title} · ${tool.summary}`),
+            h('div', { style: styles.toolDesc }, tool.description),
+            h('div', { style: styles.toolUsage }, tool.usage),
+            h(
+              'table',
+              { style: styles.table },
+              h(
+                'thead',
+                null,
+                h(
+                  'tr',
+                  null,
+                  h('th', { style: styles.th }, '参数'),
+                  h('th', { style: styles.th }, '类型'),
+                  h('th', { style: styles.th }, '必填'),
+                  h('th', { style: styles.th }, '说明'),
+                ),
+              ),
+              h(
+                'tbody',
+                null,
+                tool.parameters.map((param) =>
+                  h(
+                    'tr',
+                    { key: param.name },
+                    h('td', { style: styles.td }, h('code', null, param.name)),
+                    h('td', { style: styles.td }, param.type),
+                    h('td', { style: styles.td }, param.required ? '是' : '否'),
+                    h('td', { style: styles.td }, param.description),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      )
+    }
+
     function SettingsPanel({ onBack }) {
       const [tab, setTab] = useState('translation')
       const [keys, setKeys] = useState([])
       const [query, setQuery] = useState('')
       const [revision, setRevision] = useState(0)
       const [error, setError] = useState(null)
+      const [toolInfo, setToolInfo] = useState(null)
 
       useEffect(() => {
         fetch(`${API}/keys`)
           .then((response) => response.json())
           .then((payload) => setKeys(payload.keys || []))
           .catch((err) => setError(String(err)))
+        fetch(`${API}/tools`)
+          .then((response) => response.json())
+          .then((payload) => setToolInfo(payload))
+          .catch(() => setToolInfo({ tools: [], registered: [] }))
       }, [])
 
       const filtered = keys.filter((key) => {
@@ -747,19 +913,30 @@ window.__ModuleLoader__.load({
         h(
           'div',
           { style: styles.settingsTabs },
-          h(
-            'div',
-            {
-              style: { ...styles.tabItem, ...(tab === 'translation' ? styles.tabActive : null) },
-              onClick: () => setTab('translation'),
-            },
-            '翻译',
+          [
+            { id: 'translation', label: '翻译' },
+            { id: 'tools', label: '智能体工具' },
+          ].map((item) =>
+            h(
+              'div',
+              {
+                key: item.id,
+                style: { ...styles.tabItem, ...(tab === item.id ? styles.tabActive : null) },
+                onClick: () => setTab(item.id),
+              },
+              item.label,
+            ),
           ),
         ),
         h(
           'div',
           { style: styles.settingsBody },
-          h(
+          tab === 'tools'
+            ? h(ToolSettings, { info: toolInfo })
+            : h(
+            'div',
+            null,
+            h(
             'div',
             { style: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 } },
             h('div', { style: { fontSize: 15, fontWeight: 600 } }, '翻译'),
@@ -801,6 +978,7 @@ window.__ModuleLoader__.load({
             ),
           ),
           filtered.length === 0 ? h('div', { style: { ...styles.empty, marginTop: 10 } }, '没有匹配的字段。') : null,
+            ),
         ),
       )
     }

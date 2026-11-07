@@ -1,7 +1,7 @@
 # RimWorld Defs Viewer 使用与维护手册
 
 > 面向：项目使用者（写模组时查资料）与后续维护者（改代码/更新数据）。
-> 仓库：`E:\DataE\condex_file\git_repository\RimWorld_Mod`
+> 仓库：`<repo>`（本机实际路径见 `AGENTS.md` §9；工具本身不依赖绝对路径）。
 
 ## 1. 这是什么
 
@@ -39,7 +39,7 @@ RimWorld 1.7（原版 + 官方 DLC）的 **Def 静态查看器**：
 面板是一个 DSH bundle，位于 `<repo>/ui`，以 link 方式安装进 profile `desktop`。
 
 ```text
-安装：plugin_manager install_bundle   target = E:\DataE\condex_file\git_repository\RimWorld_Mod\ui
+安装：plugin_manager install_bundle   target = <repo>\ui
 更新：plugin_manager remove_bundle   target = @local/dsh-rimworld-defs
       plugin_manager install_bundle   target = <同上>
 ```
@@ -58,18 +58,36 @@ RimWorld 1.7（原版 + 官方 DLC）的 **Def 静态查看器**：
 
 ```powershell
 # 建（每台主机 / 每个工作目录一次；同盘、无需管理员权限）
+# <workspace> = 会话的工作目录；<repo> = 本仓库目录
 New-Item -ItemType Junction `
-  -Path 'E:\DataE\game\Rimworld_mod\.dsh\skills\RimWorld_Mod' `
-  -Target 'E:\DataE\condex_file\git_repository\RimWorld_Mod'
+  -Path '<workspace>\.dsh\skills\RimWorld_Mod' `
+  -Target '<repo>'
 ```
 
 - DSH 扫描 `<项目根>/.dsh/skills`；项目根 = 最近的含 `.git` 的祖先目录，没有则是会话的当前工作目录；
 - **必须与仓库同盘**（本机都在 `E:`）。跨盘只能改用目录符号链接，需要管理员或开发者模式；
 - 发现是**即时**的：建好联接后下一轮对话就能在技能目录里看到 `rimworld-defs-viewer`，**无需重启**；
-- 删除：`cmd /c rmdir "E:\DataE\game\Rimworld_mod\.dsh\skills\RimWorld_Mod"`（只删链接，不碰仓库内容）；
+- 删除：`cmd /c rmdir "<workspace>\.dsh\skills\RimWorld_Mod"`（只删链接，不碰仓库内容）；
 - 该目录（`.dsh/`）不属于本仓库，也不进 git。
 
 为什么不用全局配置：改 `~/.dsh/profiles/<profile>/cordis.patch.yml` 的 `customSkillDirs` 也能生效，但那是**进程级**配置，会影响该 profile 下所有会话；本仓库只需要服务固定工作目录，故用会话级的项目根。
+
+### 4.2 智能体工具（设置 → 智能体工具）
+
+面板的 Host 半在启动时把查询层注册为 DSH 工具，会话里可直接调用：
+
+| 工具 | 参数 | 用途 |
+| --- | --- | --- |
+| `rimworld_search_def` | `defName`、可选 `defType`、`includeAbstract` | 精确查 defName（或抽象模板 Name） |
+| `rimworld_search_by_label` | `query`、`limit` | 中英文关键词模糊搜索 |
+| `rimworld_list_by_source` | `source`、`limit` | 按来源列出 |
+| `rimworld_list_by_category` | `category`、`thingCategories`、`defType`、`limit` | 按分类组合过滤 |
+
+- 工具**不重写查询逻辑**，一律调用 `scripts/query_defs.py`，语义与命令行完全一致；
+- 注册用作用域 `ctx.inject(['tools'])`：没有 `tools` 服务的环境（headless / 精简 profile）自动跳过，面板照常工作；
+- 面板右上角齿轮 → **智能体工具**：列出每个工具的名称、参数、必填与用法，并标注「已注册 / 未注册」；该页**不需要任何配置**；
+- 显示「未注册」时：看启动日志里的 `已注册 N 个智能体工具`，确认当前 profile 是否加载了 `tools` 服务；
+- `ui/tools.js`、`ui/query.js` 属于 Host 半，改动后**需要重启 DSH** 才生效。
 
 ## 5. 数据更新流程
 
@@ -156,7 +174,7 @@ ui/client.js（React 面板：sidebar.panellist + main）
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
 | Core 物品显示占位图 + 提示 | `Assets.zip` 的 `.split` 贴图格式未解析 | 已知限制；DLC 正常。见 AGENTS.md §6 |
-| DLC 图标不显示 | UnityPy 缺失或 `unityPyPath` 失效 | `pip install UnityPy` 到 `D:\tools\python`，改配置并重装 |
+| DLC 图标不显示 | UnityPy 缺失或 `unityPyPath` 失效 | `pip install UnityPy` 到 `python` 所在环境，删掉该配置并重装 |
 | 面板不出现 | bundle 未安装 / 页面未刷新 | 重新安装 bundle，刷新页面 |
 | Skill 不出现（面板正常） | 工作区联接缺失、失效或跨盘 | 重建 junction；确认会话 cwd 在该工作区（见 §4.1） |
 | 提示找不到游戏目录 | 非标准安装 / 自动发现失败 | `python scripts/paths.py --json` 看来源，再设 `RIMWORLD_GAME` 或写本机配置 |
@@ -183,7 +201,10 @@ ui/client.js（React 面板：sidebar.panellist + main）
 
 ## 11. 当前版本状态（供交接）
 
-- 提交历史：见 `git log --oneline`；最近合并为「材质染色预览 / XML 悬停 / 翻译设置」。
+- 提交历史：见 `git log --oneline`。
 - 数据：schema 4，14,084 Defs。
-- 已实现：提取、查询层、校验、面板（树/详情/贴图/染色/XML/翻译）、数据变更记录、路径解析（env + 本机配置 + Steam 自动发现）、Skill 发现（工作区联接）。
-- 未实现：Core `.split` 贴图解码、DSH `@tool` 注册、遮罩染色、UI i18n。
+- 已实现：提取、查询层、校验、面板（树/详情/贴图/染色/XML/翻译）、数据变更记录、路径解析（env + 本机配置 + Steam 自动发现）、Skill 发现（工作区联接）、四个智能体工具、文件树展开/收起动画。
+- **待处理优化**：
+  1. **Core 贴图渲染**：`Assets.zip` 里的 `.split` 容器尚未解码，Core 物品显示占位图；可行路线是"运行时导出模组"或"逆向容器"（见 `AGENTS.md` §6.1、§7.1）。
+  2. **遮罩染色**：护甲与部分服装是灰度图，需按 def 的 `color` / 材料色上色。
+  3. **UI i18n**：界面文案仍写死中文，`locale/*.json` 尚未接入。
