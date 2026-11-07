@@ -45,8 +45,10 @@ RimWorld 1.7（原版 + 官方 DLC）的 **Def 静态查看器**：
 ```
 
 - 安装/更新后**刷新页面**（客户端 bundle 不会自动热更，除非同时跑 dev watcher）；
-- `ui/cordis.patch.yml` 是**本机绝对路径**配置：`dataPath`、`gameRoot`、`pythonExe`、`renderScript`、`placeholderPath`、`cacheDir`、`unityPyPath`；
-- 移动仓库或换机后必须改这些路径并重装。
+- **路径不再写在 `ui/cordis.patch.yml` 里**：由 `ui/paths.js` 解析（环境变量 → `rimworld-defs.local.json` → 面板 config → 仓库位置派生）。`dataPath`、`renderScript`、`placeholderPath`、`cacheDir` 全部由仓库位置推出，不需要配置；
+- `gameRoot` 是唯一需要外部信息的项：先自动发现（Steam 注册表 → `libraryfolders.vdf` → 候选目录），失败时用 `RIMWORLD_GAME` 或本机配置；
+- `/meta` 的 `paths` 会列出每条路径的 `source`（`env` / `local-config` / `derived` / `steam` / `data-file`）与 `valid`，迁移后先看它；
+- 换机流程：`git clone` → `python scripts/extract_defs.py` → 重建工作区联接（见 §4.1）→ 重装/刷新面板。
 
 ### 4.1 Skill 发现：工作区联接（不装 bundle、不改全局 profile）
 

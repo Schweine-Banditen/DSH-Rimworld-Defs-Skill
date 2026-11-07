@@ -16,7 +16,7 @@ RimWorld 1.7（原版 + 官方 DLC）的 **Def 静态查看器**：Python 抽取
 | 变更历史 | `<repo>\data\changes-history.json`（gitignore，保留 2 条） |
 | 图标缓存 | `<repo>\data\icon-cache\`（gitignore） |
 | Python | `D:\tools\python\python.exe`（3.14.4，lxml 6.1.3、Pillow 11.3.0） |
-| UnityPy | 目前装在 `<workspace>\out\unitypy`（临时目录，见 §6） |
+| UnityPy | 目前装在 `<workspace>\out\unitypy`（临时目录，见 §6）；用本机配置 `unityPyPath` 指向，不写进 bundle |
 | UI bundle | `<repo>\ui`（以 link 方式装进 DSH profile） |
 | DSH profile | `C:\Users\lenovo\.dsh\profiles\desktop` |
 | Skill 发现 | `<workspace>\.dsh\skills\RimWorld_Mod` → 仓库根（目录联接，会话级；见 `docs/manual.md` §4.1） |
@@ -109,7 +109,7 @@ python scripts/render_icon.py --game "<根>" --source Royalty --tex "Things/Pawn
 3. **UnityPy 是临时安装**：位于 `out/unitypy`，`ui/cordis.patch.yml` 的 `unityPyPath` 指向它。换机或清理工作区后 DLC 图标会失效；正确做法是 `pip install UnityPy` 到 `D:\tools\python` 并移除该配置。
 4. **查询层尚未注册为 DSH 工具**：`SKILL.md` 描述的四个 `@tool` 需要 TS 接入层，目前只有 UI 与 CLI。
 5. **遮罩类贴图**（护甲、部分服装）是灰度图，游戏运行时染色；静态显示为灰色剪影。
-6. `ui/cordis.patch.yml` 里是**本机绝对路径**（数据、游戏、Python、渲染脚本、占位图、缓存、UnityPy），移动仓库或换机必须改配置并重装。
+6. 路径**不写在** `ui/cordis.patch.yml`：`ui/paths.js` 从包位置派生 `dataPath` / `renderScript` / `placeholderPath` / `cacheDir`，游戏目录靠 Steam 自动发现；本机差异放 `rimworld-defs.local.json` 或环境变量。换机后重建工作区联接并重新生成数据即可。
 
 ## 7. 建议的下一步（按优先级）
 

@@ -5,9 +5,10 @@
  * quick search and rendered item textures. Textures come from Assets.zip as
  * split DDS compressed with ZSTD; the project's Python renderer decodes them.
  */
-import { readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { resolve as resolvePath, sep } from 'node:path'
+import { resolvePaths } from './paths.js'
 
 export const name = 'rimworld-defs-ui'
 
@@ -122,20 +123,35 @@ export function apply(ctx, config = {}) {
     return
   }
 
-  const dataPath = config.dataPath
-  const gameRoot = config.gameRoot
-  const pythonExe = config.pythonExe || 'python'
-  const renderScript = config.renderScript
-  const placeholderPath = config.placeholderPath
-  const cacheDir = config.cacheDir
-  const unityPyPath = config.unityPyPath
+  // 所有路径都由 ui/paths.js 解析：环境变量 → 本机配置 → bundle 配置 → 仓库派生。
+  // 仓库里不再存放绝对路径，换机只需重建工作区联接、重新生成数据。
+  const paths = resolvePaths(config)
+  const dataPath = paths.dataPath.value
+  const gameRoot = paths.gameRoot.value
+  const pythonExe = paths.pythonExe.value
+  const renderScript = paths.renderScript.value
+  const placeholderPath = paths.placeholderPath.value
+  const cacheDir = paths.cacheDir.value
+  const unityPyPath = paths.unityPyPath.value
+
+  ctx.logger?.info?.(
+    `rimworld-defs: 路径解析 data=${paths.dataPath.source} game=${paths.gameRoot.source} python=${paths.pythonExe.source}`,
+  )
+  if (!gameRoot) {
+    ctx.logger?.warn?.(
+      'rimworld-defs: 未找到 RimWorld 目录，版本提示与 XML 预览不可用；可设 RIMWORLD_GAME 或写 rimworld-defs.local.json',
+    )
+  }
 
   let cache = { mtimeMs: 0, payload: null, index: null, lookup: null }
   const iconCache = new Map()
   const TEX_PATTERN = /^[A-Za-z0-9 _\-/.]+$/
 
   function loadData() {
-    if (!dataPath) throw new Error('rimworld-defs: config.dataPath is required')
+    if (!dataPath) throw new Error('尚未解析到数据文件路径')
+    if (!existsSync(dataPath)) {
+      throw new Error(`数据文件不存在：${dataPath}（先运行 python scripts/extract_defs.py）`)
+    }
     const mtimeMs = statSync(dataPath).mtimeMs
     if (cache.payload === null || cache.mtimeMs !== mtimeMs) {
       const payload = JSON.parse(readFileSync(dataPath, 'utf8'))
@@ -254,6 +270,7 @@ export function apply(ctx, config = {}) {
   }
 
   function renderIcon(texPath, source) {
+    if (!gameRoot) return Promise.reject(new Error('未找到 RimWorld 目录，无法渲染贴图'))
     if (!renderScript) return Promise.reject(new Error('renderScript not configured'))
     const cacheKey = `${source}|${texPath}`
     if (iconCache.has(cacheKey)) return Promise.resolve(iconCache.get(cacheKey))
@@ -294,7 +311,24 @@ export function apply(ctx, config = {}) {
     })
   }
 
-  async function handle(request) {
+  /** `/meta` 回显每条路径的来源；迁移到新主机后一眼看出哪条没解析上。 */
+  function pathSummary(resolved) {
+    const field = (item) => ({ value: item.value, source: item.source, valid: item.valid })
+    return {
+      repoRoot: resolved.repoRoot,
+      localConfig: resolved.localConfig,
+      dataPath: field(resolved.dataPath),
+      gameRoot: field(resolved.gameRoot),
+      pythonExe: field(resolved.pythonExe),
+      renderScript: field(resolved.renderScript),
+      placeholderPath: field(resolved.placeholderPath),
+      cacheDir: field(resolved.cacheDir),
+      unityPyPath: field(resolved.unityPyPath),
+      discoveredGameRoots: resolved.discoveredGameRoots.slice(0, 8),
+    }
+  }
+
+  async function route(request) {
     const url = new URL(request.url)
     const path = url.pathname
     if (path === `${API_PREFIX}/meta`) {
@@ -306,6 +340,7 @@ export function apply(ctx, config = {}) {
         defCount: (payload.defs || []).length,
         changes: payload.changes || null,
         notice: notice(payload),
+        paths: pathSummary(paths),
       })
     }
     if (path === `${API_PREFIX}/index`) {
@@ -368,6 +403,9 @@ export function apply(ctx, config = {}) {
       if (!rel.startsWith('Data/') || !rel.endsWith('.xml') || rel.includes('..')) {
         return new Response('bad path', { status: 400 })
       }
+      if (!gameRoot) {
+        return json({ error: '未找到 RimWorld 目录，无法读取 XML', paths: pathSummary(paths) }, 503)
+      }
       const root = resolvePath(gameRoot)
       const full = resolvePath(root, rel)
       if (!full.startsWith(root + sep)) return new Response('bad path', { status: 400 })
@@ -408,6 +446,15 @@ export function apply(ctx, config = {}) {
       }
     }
     return new Response('not found', { status: 404 })
+  }
+
+  /** 可预期错误（数据缺失、无游戏目录）统一转 503 + 路径快照，而不是未捕获异常。 */
+  async function handle(request) {
+    try {
+      return await route(request)
+    } catch (error) {
+      return json({ error: `rimworld-defs: ${error?.message ?? error}`, paths: pathSummary(paths) }, 503)
+    }
   }
 
   ctx.effect(() =>

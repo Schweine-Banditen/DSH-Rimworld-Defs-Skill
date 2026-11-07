@@ -1,11 +1,11 @@
+# DSH bundle layer：只声明面板行，不含任何本机路径。
+#
+# 路径由 ui/paths.js 解析，优先级：
+#   环境变量 → rimworld-defs.local.json（仓库根，gitignore）→ 本行 config → 仓库位置派生
+#
+# dataPath / renderScript / placeholderPath / cacheDir 都能从包位置推出，不需要配置；
+# gameRoot 靠 Steam 自动发现，失败时用 RIMWORLD_GAME 或 rimworld-defs.local.json。
+# 需要临时覆盖时，把键写进本机配置文件，不要往这个文件里写绝对路径。
 - insert:
     - id: rimworld-defs-ui
       name: '@local/dsh-rimworld-defs'
-      config:
-        dataPath: 'E:\DataE\condex_file\git_repository\RimWorld_Mod\data\rimworld-defs.json'
-        gameRoot: 'E:\SteamLibrary\steamapps\common\RimWorld'
-        pythonExe: 'D:\tools\python\python.exe'
-        renderScript: 'E:\DataE\condex_file\git_repository\RimWorld_Mod\scripts\render_icon.py'
-        placeholderPath: 'E:\DataE\condex_file\git_repository\RimWorld_Mod\assets\placeholder.jpg'
-        cacheDir: 'E:\DataE\condex_file\git_repository\RimWorld_Mod\data\icon-cache'
-        unityPyPath: 'E:\DataE\game\Rimworld_mod\out\unitypy'
