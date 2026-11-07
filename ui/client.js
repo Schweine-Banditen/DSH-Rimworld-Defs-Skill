@@ -428,6 +428,7 @@ window.__ModuleLoader__.load({
       modalBody: { overflow: 'auto', padding: '14px 18px', minHeight: 0 },
       modalDesc: { fontSize: 12.5, lineHeight: 1.7, whiteSpace: 'pre-wrap', color: 'var(--dsw-alias-label-primary)' },
       modalActions: { display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '12px 18px', borderTop: '1px solid var(--dsw-alias-border-l1)' },
+      mineRow: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)' },
       table: { width: '100%', borderCollapse: 'collapse', fontSize: 12.5 },
       th: { textAlign: 'left', color: 'var(--dsw-alias-label-secondary)', fontWeight: 600, padding: '6px 8px', borderBottom: '1px solid var(--dsw-alias-border-l2)' },
       td: { padding: '4px 8px', borderBottom: '1px solid var(--dsw-alias-border-l1)', verticalAlign: 'middle' },
@@ -1435,6 +1436,116 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /** 我的模组：管理用户自己的工作文件夹（递归扫描其中的 Defs）。 */
+    function MyModsPanel({ onIndexChanged }) {
+      const [data, setData] = useState(null)
+      const [folderPath, setFolderPath] = useState('')
+      const [busy, setBusy] = useState('')
+      const [error, setError] = useState('')
+      const [notice, setNotice] = useState('')
+
+      const load = useCallback(() => {
+        fetch(`${API}/mymods/state`)
+          .then(readJsonResponse)
+          .then((payload) => setData(payload))
+          .catch((err) => setError(String(err)))
+      }, [])
+
+      useEffect(() => {
+        load()
+      }, [load])
+
+      const add = async () => {
+        const path = folderPath.trim()
+        if (!path) {
+          setError('请填写工作文件夹路径')
+          return
+        }
+        setBusy('add')
+        setError('')
+        try {
+          const payload = await readJsonResponse(await fetch(`${API}/mymods/add?path=${encodeURIComponent(path)}`))
+          setFolderPath('')
+          await load()
+          onIndexChanged?.()
+          setNotice(`已添加「${payload.folder.name}」：${payload.folder.defsCount} 个 Def`)
+        } catch (err) {
+          setError(String(err.message || err))
+        } finally {
+          setBusy('')
+        }
+      }
+
+      const remove = async (id) => {
+        setBusy(id)
+        setError('')
+        try {
+          await readJsonResponse(await fetch(`${API}/mymods/remove?id=${encodeURIComponent(id)}`))
+          await load()
+          onIndexChanged?.()
+          setNotice('已移除工作文件夹')
+        } catch (err) {
+          setError(String(err.message || err))
+        } finally {
+          setBusy('')
+        }
+      }
+
+      const folders = (data && data.folders) || []
+
+      return h(
+        'div',
+        null,
+        h(
+          PaneHeader,
+          { scrolled: false },
+          h('div', { style: { fontSize: 15, fontWeight: 600 } }, '我的模组'),
+          h('span', { style: styles.empty }, '添加自己的工作文件夹，会递归扫描其中的 Defs 并挂到文件树 Mine 下。'),
+          h('input', {
+            style: { ...styles.input, width: 320, marginLeft: 'auto' },
+            placeholder: '工作文件夹路径，例如 E:\\MyMod',
+            value: folderPath,
+            onChange: (event) => setFolderPath(event.target.value),
+            onKeyDown: (event) => {
+              if (event.key === 'Enter') add()
+            },
+            'aria-label': '工作文件夹路径',
+          }),
+          h(
+            'button',
+            { style: styles.primaryButton, onClick: add, disabled: busy === 'add' },
+            busy === 'add' ? '扫描中…' : '添加',
+          ),
+        ),
+        error ? h('div', { style: styles.saveError }, error) : null,
+        notice ? h('div', { style: styles.notice }, notice) : null,
+        folders.length === 0
+          ? h('div', { style: { ...styles.empty, marginTop: 12 } }, '还没有添加工作文件夹。')
+          : h(
+              'div',
+              { style: { display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 } },
+              folders.map((folder) =>
+                h(
+                  'div',
+                  { key: folder.id, style: styles.mineRow },
+                  h(
+                    'div',
+                    { style: { minWidth: 0, flex: 1 } },
+                    h('div', { style: { fontSize: 13, fontWeight: 600 } }, folder.name),
+                    h('div', { style: styles.workshopMeta }, folder.path),
+                    h('div', { style: styles.workshopMeta }, `${folder.defsCount || 0} 个 Def`),
+                  ),
+                  h(
+                    'button',
+                    { style: styles.button, onClick: () => remove(folder.id), disabled: busy === folder.id },
+                    busy === folder.id ? '移除中…' : '删除',
+                  ),
+                ),
+              ),
+            ),
+      )
+    }
+
     function SettingsPanel({ onBack, onIndexChanged }) {
       const [tab, setTab] = useState('translation')
       const [keys, setKeys] = useState([])
@@ -1613,6 +1724,7 @@ window.__ModuleLoader__.load({
           [
             { id: 'translation', label: '静态字段' },
             { id: 'workshop', label: '创意工坊' },
+            { id: 'mymods', label: '我的模组' },
             { id: 'tools', label: '智能体工具' },
           ].map((item) =>
             h(
@@ -1644,7 +1756,9 @@ window.__ModuleLoader__.load({
             ? h(ToolSettings, { info: toolInfo, scrolled })
             : tab === 'workshop'
               ? h(WorkshopPanel, { onIndexChanged })
-              : h(
+              : tab === 'mymods'
+                ? h(MyModsPanel, { onIndexChanged })
+                : h(
                 'div',
                 null,
                 h(
@@ -1893,7 +2007,8 @@ window.__ModuleLoader__.load({
       const [query, setQuery] = useState('')
       const [results, setResults] = useState([])
       const [searching, setSearching] = useState(false)
-      const [expanded, setExpanded] = useState({ Core: true })
+      // 默认全部收起：进入面板时不再自动拉开 Core。
+      const [expanded, setExpanded] = useState({})
       const [selected, setSelected] = useState(null)
       const [record, setRecord] = useState(null)
       const [error, setError] = useState(null)
