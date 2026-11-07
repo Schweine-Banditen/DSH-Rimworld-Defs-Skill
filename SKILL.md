@@ -42,6 +42,19 @@ description: 查询 RimWorld（环世界）原版与官方 DLC 的 Def 定义资
 - 自检：`python scripts/paths.py --json` 打印每个路径的来源（`env` / `local-config` / `steam` / `derived`）与是否存在；迁移后先用它定位问题。
 - 数据文件是**本机生成物**：换机器后重新生成一次，不要从旧机器复制——旧文件内嵌旧的 `gameRoot`，会让 `notice` 变成 `unknown`。
 
+## 初始化（自动配置 / 首次安装）
+
+用户要求「配置 / 安装这个 Skill」时，按顺序执行并逐步验证：
+
+1. **环境**：Python ≥ 3.13（读 `Assets.zip` 的 ZSTD 需要）；`pip install lxml pillow`；需要 DLC 贴图时再 `pip install UnityPy`。
+2. **生成数据**：仓库根执行 `python scripts/extract_defs.py`（游戏目录自动发现；找不到时设 `RIMWORLD_GAME` 或写 `rimworld-defs.local.json`）。
+3. **自检**：`python scripts/paths.py --json`，确认 `gameRoot.valid` 与 `data.exists` 均为 `true`。
+4. **接入面板**：用 DSH 的 `plugin_manager install_bundle` 指向 `<repo>/ui`，然后刷新页面；`/rimworld-defs/api/meta` 返回 200 即成功（该步会改动 profile 全局状态，先征得用户同意）。
+5. **让 DSH 发现本 Skill**：在会话工作目录建目录联接 `<workspace>/.dsh/skills/rimworld-defs-viewer` → 仓库根（同盘、免管理员）；下一轮对话就能在技能目录里看到它。
+6. **验证**：`python scripts/query_defs.py search-def Steel` 有结果；面板能显示 def；`rimworld_search_def` 工具可调用。
+
+路径优先级、跨盘限制与排障见仓库 `docs/manual.md` §4。
+
 ## 查询方式
 
 ### 优先：智能体工具（已由面板注册）
