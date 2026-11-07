@@ -24,6 +24,11 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable
 
+# 同目录的 paths 模块：脚本与 `import query_defs` 两种用法都能找到。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import paths  # noqa: E402 - 导入位置取决于上面的 sys.path 处理
+
 # 查询层能理解的输出结构版本。
 SUPPORTED_SCHEMA_VERSION = 4
 
@@ -33,7 +38,8 @@ NOTE_MAY_REQUIRE = "原始条件，最终是否加载由游戏运行时决定。
 
 
 def default_data_path() -> Path:
-    return Path(__file__).resolve().parent.parent / "data" / "rimworld-defs.json"
+    """默认数据文件：RIMWORLD_DATA → 本机配置 → 仓库 ``data/rimworld-defs.json``。"""
+    return paths.data_path()
 
 
 def def_identity(record: dict[str, Any]) -> str | None:
@@ -499,9 +505,10 @@ def emit(payload: dict[str, Any], output: str | None, pretty: bool, unicode: boo
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    data_path = Path(args.json).expanduser() if args.json else default_data_path()
+    resolved_path = paths.data_path(args.json)
+    resolved_game, _ = paths.game_root(args.game, resolved_path)
     try:
-        data = DefsData(data_path, args.game)
+        data = DefsData(resolved_path, resolved_game)
     except FileNotFoundError as exc:
         print(str(exc), file=sys.stderr)
         return 2
