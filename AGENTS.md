@@ -117,6 +117,13 @@ python scripts/render_icon.py --game "<根>" --source Royalty --tex "Things/Pawn
 
 1. **Core 贴图**：写一个运行时导出模组（游戏内用 Unity `Texture2D` 导出 PNG 到 `data/icon-cache`），这是最可靠的路线；或逆向 `.split` 容器。
 2. **遮罩染色**：读取 def 的 `color` / `colorTwo` 或材料色做上色。
+   与面板现有「材质染色预览」（`ui/client.js` 的 `Detail`，8 个触点）的挂钩方式：
+   - **现状**：4 个写死材质 + CSS `mix-blend-mode: multiply` 近似，颜色与游戏无关；只读 `defType` / `thingCategories` / `fields.scalars.costStuffCount`。
+   - **第一步（数据）**：`extract_defs.py` 增加导出 `color` / `colorTwo`、`stuffCategories`、以及各 StuffDef 的 `color`（`SCALAR_FIELDS` 目前没有颜色）；schema 升版并重建数据。此步不动 UI，可独立验收。
+   - **第二步（数据→选项）**：把 `MATERIALS` 写死数组换成按 def 生成——`stuffCategories` 展开为可选材质，颜色取对应 StuffDef 的 `color`；默认项仍是原色。
+   - **第三步（渲染）**：灰度遮罩图从"灰底 multiply"改为"目标色 × alpha 遮罩"（mask → tint），接近游戏真实染色；非遮罩的彩色贴图保持原样。
+   - **约束**：删除旧预览时只摘 `background` 与 `mixBlendMode`，保留 `imageFrame` / `rootImage` 两个通用样式；`dyeable` 现在的判定是"有 `costStuffCount` 字段"（恒真），重构时改为"有 `stuffCategories` 且贴图是遮罩图"。
+   - **验收**：同一件护甲切换材质后颜色接近游戏内；不可染色的 def 不出现下拉；数据校验仍为 0 不一致。
 3. **翻译表**扩展：分类值、comps 属性等；可考虑按 `defType` 分组或只列常用键。
 4. **i18n**：UI 文案接入 DSH locale 服务（当前写死中文）。
 5. **面板设置页**扩展：智能体工具页目前只读展示；后续可加"复制调用示例"或"一键试跑"。

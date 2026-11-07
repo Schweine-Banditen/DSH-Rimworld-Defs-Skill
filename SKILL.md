@@ -1,6 +1,7 @@
 ---
 name: rimworld-defs-viewer
 description: 查询 RimWorld（环世界）原版与官方 DLC 的 Def 定义资料，辅助编写模组 XML：确认 defName 是否存在、由哪个 DLC 定义、label 中英文、category/thingCategories、ParentName 继承链、MayRequire 条件与贴图引用。只返回 XML 模板层信息，不返回游戏运行时合并后的最终值。
+whenToUse: 用户要求安装、配置、迁移或初始化本技能时；或写 RimWorld 模组需要查 Def 资料时。
 ---
 
 # RimWorld Defs 查看器
