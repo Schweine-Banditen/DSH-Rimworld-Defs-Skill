@@ -277,7 +277,7 @@ export function apply(ctx, config = {}) {
       items.sort((a, b) => (a.label || a.defName).localeCompare(b.label || b.defName))
       groups.push({ key: `mod:${mod.id}`, label: mod.name || mod.id, count: items.length, items })
     }
-    if (groups.length === 0) return
+    // 即使一个模组都没拉取，也保留 "Mods" 节点，避免文件树结构忽隐忽现。
     sources.push({ name: 'Mods', count: groups.reduce((sum, group) => sum + group.count, 0), groups })
   }
 
@@ -538,7 +538,9 @@ export function apply(ctx, config = {}) {
     }
     if (path === `${API_PREFIX}/index`) {
       const { payload } = loadData()
-      const sources = buildIndex(payload)
+      // buildIndex 会缓存并复用同一个数组，先过滤掉旧的 Mods 再追加，
+      // 否则多次请求会在这个缓存数组里累积出多个 "Mods" 来源。
+      const sources = buildIndex(payload).filter((source) => source.name !== 'Mods')
       appendWorkshopIndex(sources)
       return json({ notice: notice(payload), groups: GROUPS, sources })
     }
@@ -582,7 +584,13 @@ export function apply(ctx, config = {}) {
       const id = url.searchParams.get('id') || ''
       if (!/^\d+$/.test(id)) return json({ error: 'bad id' }, 400)
       const state = readWorkshopState()
-      delete state.mods[id]
+      const entry = state.mods[id]
+      if (!entry) return json({ error: '该模组不在检测结果中' }, 404)
+      // 只删数据，保留卡片：下次仍能直接再次拉取。
+      entry.pulled = false
+      entry.defsCount = 0
+      entry.pulledAt = null
+      entry.updateAvailable = false
       writeWorkshopState(state)
       try {
         unlinkSync(join(workshopDir, `${id}.json`))
@@ -590,7 +598,7 @@ export function apply(ctx, config = {}) {
         /* 文件可能已不存在 */
       }
       workshopCache.delete(id)
-      return json({ ok: true })
+      return json({ mod: entry })
     }
     if (path === `${API_PREFIX}/workshop/preview`) {
       const id = url.searchParams.get('id') || ''

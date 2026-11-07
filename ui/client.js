@@ -409,12 +409,12 @@ window.__ModuleLoader__.load({
       setDelete: { fontSize: 11.5, padding: '3px 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer' },
       setLocked: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' },
       workshopGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12, marginTop: 12 },
-      workshopCard: { display: 'flex', gap: 10, padding: 10, borderRadius: 10, border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', minWidth: 0 },
+      workshopCard: { display: 'flex', gap: 10, padding: 10, borderRadius: 10, border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', minWidth: 0, minHeight: 118, alignItems: 'stretch' },
       workshopThumb: { width: 72, height: 72, borderRadius: 8, objectFit: 'cover', flex: '0 0 auto', background: 'var(--dsw-alias-bg-layer-2)' },
-      workshopBody: { minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 },
+      workshopBody: { minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3, flex: 1 },
       workshopName: { fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
       workshopMeta: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' },
-      workshopDesc: { fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.5, maxHeight: 50, overflow: 'hidden' },
+      workshopDesc: { fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.5, maxHeight: 56, overflow: 'hidden', flex: '1 1 auto', cursor: 'help' },
       workshopActions: { display: 'flex', gap: 6, marginTop: 'auto', paddingTop: 6, justifyContent: 'flex-end' },
       badgeOk: { fontSize: 10.5, padding: '0 6px', borderRadius: 999, border: '1px solid var(--dsw-alias-brand-primary)', color: 'var(--dsw-alias-brand-primary)' },
       badgeWarn: { fontSize: 10.5, padding: '0 6px', borderRadius: 999, border: '1px solid var(--dsw-alias-state-warn-primary)', color: 'var(--dsw-alias-state-warn-primary)' },
@@ -1162,6 +1162,8 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = useState('')
       const [error, setError] = useState('')
       const [notice, setNotice] = useState('')
+      const [query, setQuery] = useState('')
+      const [descHover, setDescHover] = useState(null)
 
       const loadState = useCallback(() => {
         fetch(`${API}/workshop/state`)
@@ -1211,7 +1213,7 @@ window.__ModuleLoader__.load({
           await readJsonResponse(await fetch(`${API}/workshop/remove?id=${encodeURIComponent(id)}`))
           await loadState()
           onIndexChanged?.()
-          setNotice('已删除，文件树中不再显示')
+          setNotice('已删除模组数据；卡片保留，可再次拉取')
         } catch (err) {
           setError(String(err.message || err))
         } finally {
@@ -1220,6 +1222,14 @@ window.__ModuleLoader__.load({
       }
 
       const mods = (data && data.mods) || []
+      const needle = query.trim().toLowerCase()
+      const filtered = needle
+        ? mods.filter((mod) =>
+            [mod.name, mod.author, mod.packageId, mod.description].some((value) =>
+              String(value || '').toLowerCase().includes(needle),
+            ),
+          )
+        : mods
 
       return h(
         'div',
@@ -1229,9 +1239,16 @@ window.__ModuleLoader__.load({
           { scrolled: false },
           h('div', { style: { fontSize: 15, fontWeight: 600 } }, '创意工坊'),
           h('span', { style: styles.empty }, '检测只读取元数据；点「拉取」才会解析该模组的 Defs 并加入文件树。'),
+          h('input', {
+            style: { ...styles.input, width: 220, marginLeft: 'auto' },
+            placeholder: '搜索模组名 / 作者 / 描述',
+            value: query,
+            onChange: (event) => setQuery(event.target.value),
+            'aria-label': '搜索模组',
+          }),
           h(
             'button',
-            { style: { ...styles.primaryButton, marginLeft: 'auto' }, onClick: detect, disabled: busy === 'detect' },
+            { style: styles.primaryButton, onClick: detect, disabled: busy === 'detect' },
             busy === 'detect' ? '检测中…' : '检测工坊',
           ),
         ),
@@ -1243,7 +1260,7 @@ window.__ModuleLoader__.load({
         h(
           'div',
           { style: styles.workshopGrid },
-          mods.map((mod) =>
+          filtered.map((mod) =>
             h(
               'div',
               { key: mod.id, style: styles.workshopCard },
@@ -1266,7 +1283,22 @@ window.__ModuleLoader__.load({
                   mod.missing ? h('span', { style: styles.badgeWarn }, '工坊中未找到') : null,
                   mod.pulled ? h('span', { style: styles.badgeOk }, `已拉取 ${mod.defsCount || 0}`) : null,
                 ),
-                h('div', { style: styles.workshopDesc }, mod.description || '（无描述）'),
+                h(
+                  'div',
+                  {
+                    style: styles.workshopDesc,
+                    onMouseEnter: (event) =>
+                      setDescHover({
+                        text: mod.description || '（无描述）',
+                        x: event.clientX,
+                        y: event.clientY,
+                      }),
+                    onMouseMove: (event) =>
+                      setDescHover((previous) => (previous ? { ...previous, x: event.clientX, y: event.clientY } : previous)),
+                    onMouseLeave: () => setDescHover(null),
+                  },
+                  mod.description || '（无描述）',
+                ),
                 h(
                   'div',
                   { style: styles.workshopActions },
@@ -1295,6 +1327,32 @@ window.__ModuleLoader__.load({
             ),
           ),
         ),
+        descHover
+          ? h(
+              'div',
+              {
+                style: {
+                  position: 'fixed',
+                  left: Math.max(8, Math.min(descHover.x + 14, window.innerWidth - 400)),
+                  top: Math.max(8, Math.min(descHover.y + 14, window.innerHeight - 220)),
+                  width: 380,
+                  maxHeight: 200,
+                  overflow: 'auto',
+                  zIndex: 60,
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  border: '1px solid var(--dsw-alias-border-l2)',
+                  background: 'var(--dsw-alias-bg-overlay)',
+                  boxShadow: '0 12px 32px rgba(0,0,0,.28)',
+                  fontSize: 12,
+                  lineHeight: 1.6,
+                  whiteSpace: 'pre-wrap',
+                  pointerEvents: 'none',
+                },
+              },
+              descHover.text,
+            )
+          : null,
       )
     }
 
