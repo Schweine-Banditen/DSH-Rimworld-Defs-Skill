@@ -361,7 +361,9 @@ window.__ModuleLoader__.load({
       settingsBody: { flex: 1, overflow: 'auto', padding: '16px 22px' },
       setBar: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' },
       chevronButton: { fontSize: 11, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer' },
-      primaryButton: { fontSize: 12, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--dsw-alias-brand-primary)', background: 'var(--dsw-alias-brand-primary)', color: '#fff', cursor: 'pointer' },
+      primaryButton: { fontSize: 12, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--dsw-alias-brand-primary)', background: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 16%, var(--dsw-alias-bg-layer-1))', color: 'var(--dsw-alias-brand-primary)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5, fontWeight: 600 },
+      paneHeader: { position: 'sticky', top: 0, zIndex: 5, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', margin: '-4px 0 10px', padding: '6px 0 8px', background: 'var(--dsw-alias-bg-base)' },
+      backTop: { position: 'absolute', right: 18, bottom: 18, width: 38, height: 38, borderRadius: '50%', border: '1px solid var(--dsw-alias-border-l2)', background: 'color-mix(in srgb, var(--dsw-alias-bg-overlay) 78%, transparent)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', color: 'var(--dsw-alias-label-secondary)', fontSize: 16, lineHeight: 1, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 6px 18px rgba(0,0,0,.18)', zIndex: 10, animation: 'rwFade .16s ease-out' },
       iconButton: { width: 30, height: 30, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer', fontSize: 15, lineHeight: 1 },
       saveCluster: { position: 'relative', display: 'flex', alignItems: 'center', gap: 8 },
       descPopover: { position: 'absolute', top: 'calc(100% + 6px)', left: 0, width: 320, zIndex: 30, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-overlay)', boxShadow: '0 12px 32px rgba(0,0,0,.28)' },
@@ -1013,7 +1015,7 @@ window.__ModuleLoader__.load({
         null,
         h(
           'div',
-          { style: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 } },
+          { style: styles.paneHeader },
           h('div', { style: { fontSize: 15, fontWeight: 600 } }, '智能体工具'),
           h(
             'span',
@@ -1088,6 +1090,8 @@ window.__ModuleLoader__.load({
       const [saveError, setSaveError] = useState('')
       const [notice, setNotice] = useState('')
       const clusterRef = useRef(null)
+      const bodyRef = useRef(null)
+      const [showBackTop, setShowBackTop] = useState(false)
 
       useEffect(() => {
         fetch(`${API}/keys`)
@@ -1265,7 +1269,11 @@ window.__ModuleLoader__.load({
           { style: styles.settingsMain },
           h(
           'div',
-          { style: styles.settingsBody },
+          {
+            style: styles.settingsBody,
+            ref: bodyRef,
+            onScroll: (event) => setShowBackTop(event.currentTarget.scrollTop > 240),
+          },
           tab === 'tools'
             ? h(ToolSettings, { info: toolInfo })
             : h(
@@ -1273,7 +1281,7 @@ window.__ModuleLoader__.load({
                 null,
                 h(
                   'div',
-                  { style: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' } },
+                  { style: styles.paneHeader },
                   h('div', { style: { fontSize: 15, fontWeight: 600 } }, '翻译'),
                   h('span', { style: styles.empty }, '为字段名补充中文；填写后会在属性显示时追加。'),
                   h('input', {
@@ -1324,7 +1332,25 @@ window.__ModuleLoader__.load({
                     },
                     descOpen ? '▴' : '▾',
                   ),
-                  h('button', { style: styles.primaryButton, onClick: saveAs }, '保存'),
+                  h(
+                    'button',
+                    { style: styles.primaryButton, onClick: saveAs },
+                    h(
+                      'svg',
+                      {
+                        width: 13,
+                        height: 13,
+                        viewBox: '0 0 24 24',
+                        fill: 'none',
+                        stroke: 'currentColor',
+                        strokeWidth: 2.4,
+                        strokeLinecap: 'round',
+                        strokeLinejoin: 'round',
+                      },
+                      h('polyline', { points: '20 6 9 17 4 12' }),
+                    ),
+                    '保存',
+                  ),
                   h(
                     PopLayer,
                     { open: descOpen, style: styles.descPopover },
@@ -1408,6 +1434,21 @@ window.__ModuleLoader__.load({
                 filtered.length === 0 ? h('div', { style: { ...styles.empty, marginTop: 10 } }, '没有匹配的字段。') : null,
               ),
         ),
+          showBackTop
+            ? h(
+                'button',
+                {
+                  style: styles.backTop,
+                  onClick: () => {
+                    const element = bodyRef.current
+                    if (element) element.scrollTo({ top: 0, behavior: 'smooth' })
+                  },
+                  title: '回到顶部',
+                  'aria-label': '回到顶部',
+                },
+                '↑',
+              )
+            : null,
         dialogOpen
           ? h(
               'div',
