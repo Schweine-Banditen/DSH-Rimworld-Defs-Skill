@@ -86,17 +86,19 @@ window.__ModuleLoader__.load({
       return id
     }
 
-    /** 把当前翻译复制成一个新集合（重名自动加序号），并切换过去。 */
-    function createSetFromCurrent(name) {
+    /** 新建集合（entries 省略时复制当前翻译），切换过去；重名自动加序号。 */
+    function createSet(name, entries) {
       let candidate = String(name || '').trim() || '我的翻译'
       if (PROFILES.sets[candidate]) {
         let index = 2
         while (PROFILES.sets[`${candidate} ${index}`]) index += 1
         candidate = `${candidate} ${index}`
       }
-      PROFILES.sets[candidate] = { ...TRANSLATIONS }
+      const content = { ...(entries || TRANSLATIONS) }
+      PROFILES.sets[candidate] = content
       PROFILES.active = candidate
       persistProfiles()
+      replaceTranslations(content)
       return candidate
     }
 
@@ -1001,6 +1003,8 @@ window.__ModuleLoader__.load({
       const [activeSet, setActiveSet] = useState(PROFILES.active)
       const [setNames, setSetNames] = useState(() => Object.keys(PROFILES.sets))
       const [newSetName, setNewSetName] = useState('')
+      const [selectedSet, setSelectedSet] = useState(PROFILES.active)
+      const [applying, setApplying] = useState(false)
       const [notice, setNotice] = useState('')
 
       useEffect(() => {
@@ -1031,23 +1035,76 @@ window.__ModuleLoader__.load({
         return key.toLowerCase().includes(needle) || zhOf(key).toLowerCase().includes(needle)
       })
 
-      // 内置集与默认集只读：在它们上面编辑时，先把当前内容另存成一个用户集。
+      // 下拉只负责"选来源"：必须按「应用覆盖」才会写进当前表格。
+      const readOnlySet = activeSet === DEFAULT_SET || activeSet === BUILTIN_PRESET
+
+      // 内置集与默认集只读：在它们上面直接编辑时，先把当前内容另存成用户集。
       const ensureEditable = () => {
         if (PROFILES.active !== DEFAULT_SET && PROFILES.active !== BUILTIN_PRESET) return
-        const name = createSetFromCurrent(newSetName || '我的翻译')
+        const name = createSet(newSetName || '我的翻译')
         setActiveSet(name)
         setSetNames(Object.keys(PROFILES.sets))
         setNewSetName('')
         setNotice(`已另存为「${name}」`)
       }
 
-      const switchSet = (id) => {
-        if (id === activeSet) return
-        activateSet(id)
-        setActiveSet(id)
-        setSetNames(Object.keys(PROFILES.sets))
-        setRevision((value) => value + 1)
-        setNotice('')
+      /** 内置预设按需拉取：面板启动时拉失败（例如没重启）也还能点按钮重试。 */
+      const ensurePreset = async () => {
+        if (BUILTIN && BUILTIN.entries) return BUILTIN
+        const response = await fetch(`${API}/presets`)
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const preset = await response.json()
+        BUILTIN = preset
+        writeStorage(PRESET_CACHE_KEY, preset)
+        return preset
+      }
+
+      const entriesOf = async (id) => {
+        if (id === DEFAULT_SET) return {}
+        if (id === BUILTIN_PRESET) {
+          const preset = await ensurePreset()
+          return preset.entries || {}
+        }
+        return PROFILES.sets[id] || {}
+      }
+
+      const applySelected = async () => {
+        setApplying(true)
+        try {
+          const entries = await entriesOf(selectedSet)
+          const count = Object.keys(entries).length
+          if (count === 0 && selectedSet !== DEFAULT_SET) {
+            setNotice('所选翻译集为空，未做改动')
+            return
+          }
+          if (readOnlySet) {
+            if (count === 0) {
+              // 用「默认」把表格清空，保持只读状态，不产生空集合。
+              activateSet(DEFAULT_SET)
+              setActiveSet(DEFAULT_SET)
+              setNotice('当前表格已清空（默认集）')
+            } else {
+              // 当前是只读集：新建一个用户集来承载，避免污染内置/默认。
+              const name = createSet(newSetName || '我的翻译', entries)
+              setActiveSet(name)
+              setSetNames(Object.keys(PROFILES.sets))
+              setNewSetName('')
+              setNotice(`已载入 ${count} 条，另存为「${name}」`)
+            }
+          } else {
+            // 当前是用户集：用所选内容整份覆盖它。
+            const target = PROFILES.active
+            PROFILES.sets[target] = { ...entries }
+            persistProfiles()
+            replaceTranslations(entries)
+            setNotice(count === 0 ? `已清空「${target}」` : `已用所选翻译覆盖「${target}」（${count} 条）`)
+          }
+          setRevision((value) => value + 1)
+        } catch (error) {
+          setNotice(`载入失败：${error.message}｜新增的 /presets 接口需要重启 DSH 才生效`)
+        } finally {
+          setApplying(false)
+        }
       }
 
       const setValue = (key, value) => {
@@ -1064,8 +1121,7 @@ window.__ModuleLoader__.load({
       }
 
       const saveAs = () => {
-        const name = createSetFromCurrent(newSetName)
-        persistActiveSet()
+        const name = createSet(newSetName)
         setActiveSet(name)
         setSetNames(Object.keys(PROFILES.sets))
         setNewSetName('')
@@ -1078,13 +1134,13 @@ window.__ModuleLoader__.load({
         delete PROFILES.sets[removed]
         activateSet(DEFAULT_SET)
         setActiveSet(DEFAULT_SET)
+        setSelectedSet(DEFAULT_SET)
         setSetNames(Object.keys(PROFILES.sets))
         setRevision((value) => value + 1)
         setNotice(`已删除「${removed}」`)
       }
 
       const builtinLabel = (BUILTIN && BUILTIN.label) || '简体中文（内置）'
-      const readOnlySet = activeSet === DEFAULT_SET || activeSet === BUILTIN_PRESET
 
       return h(
         'div',
@@ -1121,14 +1177,26 @@ window.__ModuleLoader__.load({
               h('span', { style: styles.setLabel }, '翻译集'),
               h(
                 'select',
-                { style: styles.select, value: activeSet, onChange: (event) => switchSet(event.target.value) },
+                { style: styles.select, value: selectedSet, onChange: (event) => setSelectedSet(event.target.value) },
                 h('option', { value: DEFAULT_SET }, '默认（全部为空）'),
-                h('option', { value: BUILTIN_PRESET }, builtinLabel),
+                h(
+                  'option',
+                  { value: BUILTIN_PRESET },
+                  BUILTIN && BUILTIN.entries
+                    ? `${builtinLabel} · ${Object.keys(BUILTIN.entries).length} 条`
+                    : `${builtinLabel}（未加载，需重启 DSH）`,
+                ),
                 setNames.map((name) => h('option', { key: name, value: name }, name)),
               ),
+              h(
+                'button',
+                { style: styles.button, onClick: applySelected, disabled: applying },
+                applying ? '载入中…' : '应用覆盖',
+              ),
+              h('span', { style: styles.setLabel }, `当前：${activeSet === DEFAULT_SET ? '默认（未保存）' : activeSet}`),
               h('input', {
-                style: { ...styles.input, width: 180 },
-                placeholder: '另存为名称（留空自动命名）',
+                style: { ...styles.input, width: 160 },
+                placeholder: '另存为名称',
                 value: newSetName,
                 onChange: (event) => setNewSetName(event.target.value),
                 'aria-label': '另存为名称',
@@ -1136,11 +1204,7 @@ window.__ModuleLoader__.load({
               h('button', { style: styles.button, onClick: saveNow, disabled: readOnlySet }, '保存'),
               h('button', { style: styles.button, onClick: saveAs }, '另存为'),
               h('button', { style: styles.button, onClick: removeSet, disabled: readOnlySet }, '删除'),
-              h(
-                'span',
-                { style: styles.empty },
-                notice || `已翻译 ${Object.keys(TRANSLATIONS).length} 项${readOnlySet ? ' · 只读集，编辑会自动另存' : ''}`,
-              ),
+              h('span', { style: styles.empty }, notice || `已翻译 ${Object.keys(TRANSLATIONS).length} 项`),
             ),
             h(
             'div',
