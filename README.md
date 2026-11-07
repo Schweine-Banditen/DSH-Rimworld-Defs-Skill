@@ -9,7 +9,7 @@ RimWorld（环世界）XML 定义的**静态参考工具**：由 Python 脚本�
 ## 项目构成
 
 1. **提取脚本**（`scripts/extract_defs.py`，Python + lxml）：扫描游戏 `Data/*/Defs` 与 `Languages/*/DefInjected`，产出 `data/rimworld-defs.json`。
-2. **DSH Skill**（本仓库 `SKILL.md` + `ui/` 面板）：查询层已实现；四个 DSH 工具的接入层待补。
+2. **DSH Skill**（`SKILL.md` + `ui/` 面板）：查询层、面板与四个智能体工具均已实现。
 
 ## 核心边界：静态参考 ≠ 运行时真相
 
@@ -27,9 +27,9 @@ JSON 记录的是 **Def XML 的模板层面信息**（每个 `Def` 节点写了�
 | 脚本语言 | Python 3.11+（本机 3.14.4） |
 | XML 解析 | `lxml`（必须；不使用 `xmltodict` / 标准库 `ElementTree`） |
 | CLI 参数 | `argparse`（标准库足够，脚本无子命令树，避免引入额外依赖） |
-| 工具注册 | 自写薄 TS 壳 + 官方 `@deepseek-ai/*` 包（不使用第三方 bridge 包） |
+| 工具注册 | 面板 bundle 内直接用 `ctx.tools.register`（纯 JS，无构建步骤） |
 
-依赖安装：`lxml==6.1.3` 已装入本机 `D:\tools\python`（`pip install lxml==6.1.3`），解析脚本直接调用 `python` 即可运行。
+依赖安装：`lxml==6.1.3`（`pip install lxml==6.1.3`）装到 `python` 所在环境即可，解析脚本直接调用 `python` 运行。
 
 ## 目录结构
 
@@ -58,17 +58,20 @@ JSON 记录的是 **Def XML 的模板层面信息**（每个 `Def` 节点写了�
 ## 提取脚本用法
 
 ```bash
-# 默认输出到本仓库 data/rimworld-defs.json
-python scripts/extract_defs.py --game "E:\SteamLibrary\steamapps\common\RimWorld"
+# 默认输出到本仓库 data/rimworld-defs.json；游戏目录自动发现
+python scripts/extract_defs.py
 
 # 输出到别处 + 缩进（人工检查用）
-python scripts/extract_defs.py --game "<RimWorld 根目录>" --output ./sample.json --pretty
+python scripts/extract_defs.py --output ./sample.json --pretty
+
+# 非标准安装时显式指定
+python scripts/extract_defs.py --game "<game>"
 ```
 
 | 参数 | 说明 |
 | --- | --- |
-| `--game DIR` | 必填，RimWorld 根目录（其下须存在 `Data/Core/Defs`），否则退出码 2 |
-| `--output FILE` | 可选，默认 `<脚本目录>/../data/rimworld-defs.json`（基于 `__file__`，不写死绝对路径） |
+| `--game DIR` | 可选。RimWorld 根目录（其下须存在 `Data/Core/Defs`）；省略时依次取 `RIMWORLD_GAME` → `rimworld-defs.local.json` → 数据文件记录 → Steam 自动发现。给了无效目录则退出码 2 |
+| `--output FILE` | 可选，默认 `<repo>/data/rimworld-defs.json`（可被 `RIMWORLD_DATA` 或本机配置覆盖） |
 | `--pretty` | 缩进输出；默认紧凑 JSON（6.0 MB vs 8.3 MB） |
 | `--check` | 只比对该 JSON 的 `gameVersion` 与当前游戏版本；不扫描、不写文件。退出码：`0`=一致，`1`=需要重新生成，`2`=路径错误 |
 | `--language NAME` | 采集的 DefInjected 语言目录名，默认 `ChineseSimplified (简体中文)` |
@@ -83,8 +86,8 @@ python scripts/extract_defs.py --game "<RimWorld 根目录>" --output ./sample.j
 游戏版本变了（`Version.txt` 变化）就重跑同一条命令即可，脚本会整份重建数据并原子替换：
 
 ```bash
-python scripts/extract_defs.py --game "<RimWorld 根目录>"          # 重建
-python scripts/extract_defs.py --game "<RimWorld 根目录>" --check  # 确认最新（退出码 0）
+python scripts/extract_defs.py          # 重建（游戏目录自动发现）
+python scripts/extract_defs.py --check  # 确认最新（退出码 0）
 ```
 
 - JSON 内的 `gameVersion` 取自游戏根目录 `Version.txt`，`schemaVersion` 表示输出结构版本；
@@ -278,13 +281,26 @@ python scripts/query_defs.py list-category --category Item --thing-categories Re
 
 ```bash
 # 由 DSH 的 plugin_manager 安装本目录，例如：
-# install_bundle target=E:\DataE\condex_file\git_repository\RimWorld_Mod\ui
+# install_bundle target=<repo>\ui
 ```
 
-`ui/cordis.patch.yml` 里是**本机绝对路径**（数据、游戏、Python、渲染脚本、占位图），移动仓库或换机后需要修改并重装。
+`ui/cordis.patch.yml` 不含本机路径：`ui/paths.js` 从包位置派生数据与资源路径，游戏目录自动发现；本机差异写 `rimworld-defs.local.json`（gitignore）或用环境变量。
+
+## 智能体工具
+
+面板 Host 半在启动时向 DSH 注册四个工具，会话里可直接调用（与 CLI 语义一致，内部调用 `scripts/query_defs.py`）：
+
+| 工具 | 参数 | 用途 |
+| --- | --- | --- |
+| `rimworld_search_def` | `defName`、可选 `defType`、`includeAbstract` | 精确查 defName（或模板 Name） |
+| `rimworld_search_by_label` | `query`、`limit` | 中英文关键词模糊搜索 |
+| `rimworld_list_by_source` | `source`、`limit` | 按来源列出 |
+| `rimworld_list_by_category` | `category`、`thingCategories`、`defType`、`limit` | 按分类组合过滤 |
+
+面板「设置 → 智能体工具」只读列出这些工具的说明与注册状态，不需要配置。
 
 ## 待决事项
 
-1. **Skill 查询层**：四个工具（`search_def`、`search_by_label`、`list_by_source`、`list_by_category`）尚未实现。
-2. **bundle 打包与安装**：薄 TS 壳需要打成 bundle 装进 DSH profile 才能全局可见；安装会改变 profile 状态，动手前单独确认。
+1. **Core 贴图**：`.split` 容器尚未解码，Core 物品显示占位图（见 `AGENTS.md` §6）。
+2. **bundle 打包分发**：`ui/` 目前以 link 方式安装；若要走 npm 分发，需要把 `scripts/`、`assets/` 一并纳入包内。
 3. **数据文件位置（打包后）**：装成 bundle 后 `Path(__file__)` 指向 `node_modules`，而 JSON 是本地生成物；拟「默认技能目录、允许配置覆盖」。

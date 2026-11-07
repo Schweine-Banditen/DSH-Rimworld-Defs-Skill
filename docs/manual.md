@@ -1,7 +1,7 @@
 # RimWorld Defs Viewer 使用与维护手册
 
 > 面向：项目使用者（写模组时查资料）与后续维护者（改代码/更新数据）。
-> 仓库：`E:\DataE\condex_file\git_repository\RimWorld_Mod`
+> 仓库：`<repo>`（本机实际路径见 `AGENTS.md` §9；工具本身不依赖绝对路径）。
 
 ## 1. 这是什么
 
@@ -39,7 +39,7 @@ RimWorld 1.7（原版 + 官方 DLC）的 **Def 静态查看器**：
 面板是一个 DSH bundle，位于 `<repo>/ui`，以 link 方式安装进 profile `desktop`。
 
 ```text
-安装：plugin_manager install_bundle   target = E:\DataE\condex_file\git_repository\RimWorld_Mod\ui
+安装：plugin_manager install_bundle   target = <repo>\ui
 更新：plugin_manager remove_bundle   target = @local/dsh-rimworld-defs
       plugin_manager install_bundle   target = <同上>
 ```
@@ -58,15 +58,16 @@ RimWorld 1.7（原版 + 官方 DLC）的 **Def 静态查看器**：
 
 ```powershell
 # 建（每台主机 / 每个工作目录一次；同盘、无需管理员权限）
+# <workspace> = 会话的工作目录；<repo> = 本仓库目录
 New-Item -ItemType Junction `
-  -Path 'E:\DataE\game\Rimworld_mod\.dsh\skills\RimWorld_Mod' `
-  -Target 'E:\DataE\condex_file\git_repository\RimWorld_Mod'
+  -Path '<workspace>\.dsh\skills\RimWorld_Mod' `
+  -Target '<repo>'
 ```
 
 - DSH 扫描 `<项目根>/.dsh/skills`；项目根 = 最近的含 `.git` 的祖先目录，没有则是会话的当前工作目录；
 - **必须与仓库同盘**（本机都在 `E:`）。跨盘只能改用目录符号链接，需要管理员或开发者模式；
 - 发现是**即时**的：建好联接后下一轮对话就能在技能目录里看到 `rimworld-defs-viewer`，**无需重启**；
-- 删除：`cmd /c rmdir "E:\DataE\game\Rimworld_mod\.dsh\skills\RimWorld_Mod"`（只删链接，不碰仓库内容）；
+- 删除：`cmd /c rmdir "<workspace>\.dsh\skills\RimWorld_Mod"`（只删链接，不碰仓库内容）；
 - 该目录（`.dsh/`）不属于本仓库，也不进 git。
 
 为什么不用全局配置：改 `~/.dsh/profiles/<profile>/cordis.patch.yml` 的 `customSkillDirs` 也能生效，但那是**进程级**配置，会影响该 profile 下所有会话；本仓库只需要服务固定工作目录，故用会话级的项目根。
@@ -173,7 +174,7 @@ ui/client.js（React 面板：sidebar.panellist + main）
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
 | Core 物品显示占位图 + 提示 | `Assets.zip` 的 `.split` 贴图格式未解析 | 已知限制；DLC 正常。见 AGENTS.md §6 |
-| DLC 图标不显示 | UnityPy 缺失或 `unityPyPath` 失效 | `pip install UnityPy` 到 `D:\tools\python`，改配置并重装 |
+| DLC 图标不显示 | UnityPy 缺失或 `unityPyPath` 失效 | `pip install UnityPy` 到 `python` 所在环境，删掉该配置并重装 |
 | 面板不出现 | bundle 未安装 / 页面未刷新 | 重新安装 bundle，刷新页面 |
 | Skill 不出现（面板正常） | 工作区联接缺失、失效或跨盘 | 重建 junction；确认会话 cwd 在该工作区（见 §4.1） |
 | 提示找不到游戏目录 | 非标准安装 / 自动发现失败 | `python scripts/paths.py --json` 看来源，再设 `RIMWORLD_GAME` 或写本机配置 |

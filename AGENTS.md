@@ -6,21 +6,23 @@
 
 RimWorld 1.7（原版 + 官方 DLC）的 **Def 静态查看器**：Python 抽取 XML → JSON → Python 查询层 → DSH 面板（Host 本机路由 + Client 侧栏页面）。用于辅助编写模组时查 defName、分类、继承、属性与中英文名。
 
-## 1. 本机关键路径
+## 1. 关键路径（不含本机绝对路径）
 
 | 项 | 路径 |
 | --- | --- |
-| 仓库 | `E:\DataE\condex_file\git_repository\RimWorld_Mod` |
-| 游戏根目录 | `E:\SteamLibrary\steamapps\common\RimWorld`（1.7.5000 rev1275） |
-| 数据文件 | `<repo>\data\rimworld-defs.json`（`schemaVersion` 4，gitignore） |
-| 变更历史 | `<repo>\data\changes-history.json`（gitignore，保留 2 条） |
-| 图标缓存 | `<repo>\data\icon-cache\`（gitignore） |
-| Python | `D:\tools\python\python.exe`（3.14.4，lxml 6.1.3、Pillow 11.3.0） |
-| UnityPy | 目前装在 `<workspace>\out\unitypy`（临时目录，见 §6）；用本机配置 `unityPyPath` 指向，不写进 bundle |
-| UI bundle | `<repo>\ui`（以 link 方式装进 DSH profile） |
-| DSH profile | `C:\Users\lenovo\.dsh\profiles\desktop` |
-| Skill 发现 | `<workspace>\.dsh\skills\RimWorld_Mod` → 仓库根（目录联接，会话级；见 `docs/manual.md` §4.1） |
-| 本机路径覆盖 | `<repo>\rimworld-defs.local.json`（gitignore，参考 `.example.json`） |
+| 仓库 | `<repo>`（可位于任意目录；工具不依赖它的绝对位置） |
+| 游戏根目录 | 自动发现：`RIMWORLD_GAME` → 本机配置 → 数据文件记录 → Steam（注册表 + `libraryfolders.vdf`）→ 候选目录 |
+| 数据文件 | `<repo>/data/rimworld-defs.json`（`schemaVersion` 4，gitignore） |
+| 变更历史 | `<repo>/data/changes-history.json`（gitignore，保留 2 条） |
+| 图标缓存 | `<repo>/data/icon-cache/`（gitignore） |
+| Python | PATH 上的 `python`；或 `RIMWORLD_PYTHON` / 本机配置 `pythonExe` |
+| UnityPy | 可选依赖，用本机配置 `unityPyPath` 指向（临时安装即可，见 §6） |
+| UI bundle | `<repo>/ui`（以 link 方式装进 DSH profile） |
+| DSH profile | 由 DSH 管理，不在仓库内 |
+| 本机路径覆盖 | `<repo>/rimworld-defs.local.json`（gitignore；模板见 `.example.json`） |
+| Skill 发现 | `<workspace>/.dsh/skills/<名称>` → 仓库根（目录联接，会话级；见 `docs/manual.md` §4.1） |
+
+本机实际路径见 §9；发布前该节整节删除。
 
 ## 2. 架构（四层）
 
@@ -35,7 +37,7 @@ ui/（DSH bundle：Host 路由 + Client 面板）
    Host：/meta /index /def /search /keys /icon /xml /placeholder
    Client：sidebar.panellist + main 槽位；文件树 + 结构树 + 设置页
         ▼
-DSH Web GUI（127.0.0.1:53701，本机回环，不联网）
+DSH Web GUI（本机回环，端口由 DSH 分配，不联网）
 ```
 
 - **提取层**：`scripts/extract_defs.py`，输出 schema 4；含 `fields`（scalars/statBases/building/comps）、`graphic`（含 `effective`）、`changes`。
@@ -98,7 +100,7 @@ python scripts/verify_defs.py --samples 100
 python scripts/render_icon.py --game "<根>" --source Royalty --tex "Things/Pawn/Humanlike/Apparel/CataphractArmor/CataphractArmor" > icon.png
 
 # UI 安装 / 更新（通过 DSH plugin_manager）
-#   install_bundle   target = E:\DataE\condex_file\git_repository\RimWorld_Mod\ui
+#   install_bundle   target = <repo>\ui
 #   更新前先 remove_bundle target=@local/dsh-rimworld-defs
 ```
 
@@ -106,7 +108,7 @@ python scripts/render_icon.py --game "<根>" --source Royalty --tex "Things/Pawn
 
 1. **Core 贴图无法解码**：`Assets.zip` 里 3,404 个 `.split` 是自定义容器（DDS 头 + 约 1.108 倍的表/索引数据），Pillow / texture2ddecoder / imagecodecs 全部解出噪声；UI 对 Core 显示占位图与提示。DLC（Unity 资源包）解码正常。**不要**用通用 DDS 解码器“修复”它。
 2. **染色是预览**：用 CSS `mix-blend-mode: multiply` 叠色，不是游戏真实材质染色算法。
-3. **UnityPy 是临时安装**：位于 `out/unitypy`，`ui/cordis.patch.yml` 的 `unityPyPath` 指向它。换机或清理工作区后 DLC 图标会失效；正确做法是 `pip install UnityPy` 到 `D:\tools\python` 并移除该配置。
+3. **UnityPy 是临时安装**：位于工作区的 `out/unitypy`，由本机配置 `unityPyPath` 指向（不写进 bundle）。换机或清理工作区后 DLC 图标会失效；正确做法是 `pip install UnityPy` 到 `python` 所在环境，并删掉该配置项。
 4. **工具由面板注册，不是独立包**：`ui/tools.js` 在面板 `apply()` 里通过作用域 `ctx.inject(['tools'])` 注册四个工具；缺 `tools` 服务（headless）时跳过，面板照常工作。工具只调用 `scripts/query_defs.py`，不重写查询逻辑。
 5. **遮罩类贴图**（护甲、部分服装）是灰度图，游戏运行时染色；静态显示为灰色剪影。
 6. 路径**不写在** `ui/cordis.patch.yml`：`ui/paths.js` 从包位置派生 `dataPath` / `renderScript` / `placeholderPath` / `cacheDir`，游戏目录靠 Steam 自动发现；本机差异放 `rimworld-defs.local.json` 或环境变量。换机后重建工作区联接并重新生成数据即可。
@@ -118,3 +120,32 @@ python scripts/render_icon.py --game "<根>" --source Royalty --tex "Things/Pawn
 3. **翻译表**扩展：分类值、comps 属性等；可考虑按 `defType` 分组或只列常用键。
 4. **i18n**：UI 文案接入 DSH locale 服务（当前写死中文）。
 5. **面板设置页**扩展：智能体工具页目前只读展示；后续可加"复制调用示例"或"一键试跑"。
+
+## 8. 发布前检查（对外发布本仓库时）
+
+1. **全仓库不得出现本机绝对路径**（§9 除外）：
+   ```powershell
+   Select-String -Path *.md,docs\*.md,ui\*.js,scripts\*.py -Pattern '[A-Za-z]:\\'
+   ```
+   命中项要么改成 `<repo>` / `<game>` / `<workspace>` 占位符，要么归入 §9。
+2. **删除 §9「开发机备注」整节**（它是发布前唯一允许保留本机信息的地方）。
+3. 确认这些没有入库：`data/`、`rimworld-defs.local.json`、`out/`、`__pycache__/`、`node_modules/`。
+4. 确认 `SKILL.md` 全篇只有相对路径，且 Base directory = 仓库根。
+5. 新机器验收四步：`git clone` → `python scripts/extract_defs.py` → 建工作区联接（§4.1）→ 刷新面板，能查到 def 即通过。
+
+## 9. 开发机备注（发布前删除整节）
+
+> 以下内容只对开发机有效，**不随仓库发布**。
+
+| 项 | 本机值 |
+| --- | --- |
+| 仓库 | `E:\DataE\condex_file\git_repository\RimWorld_Mod` |
+| 游戏根目录 | `E:\SteamLibrary\steamapps\common\RimWorld`（`1.7.5000 rev1275`，Steam） |
+| Python | `D:\tools\python\python.exe`（3.14.4；lxml 6.1.3、Pillow 11.3.0） |
+| UnityPy 临时安装 | `E:\DataE\game\Rimworld_mod\out\unitypy`（写入本机配置 `unityPyPath`） |
+| 工作区 | `E:\DataE\game\Rimworld_mod` |
+| 技能联接 | `E:\DataE\game\Rimworld_mod\.dsh\skills\RimWorld_Mod` → 仓库根 |
+| DSH profile | `C:\Users\<user>\.dsh\profiles\desktop`（`@local/dsh-rimworld-defs` 以 link 装入） |
+| 本机配置 | `E:\DataE\condex_file\git_repository\RimWorld_Mod\rimworld-defs.local.json` |
+
+（用户名按约定隐去；其余为排障所需的最小信息。）

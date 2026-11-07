@@ -10,7 +10,7 @@
 
 用法::
 
-    python scripts/extract_defs.py --game E:\\SteamLibrary\\steamapps\\common\\RimWorld
+    python scripts/extract_defs.py --game <RimWorld 根目录>
     python scripts/extract_defs.py --game <root> --output ./sample.json --pretty
     python scripts/extract_defs.py --game <root> --check   # 只比对版本，不重写数据
 """

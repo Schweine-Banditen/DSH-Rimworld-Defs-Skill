@@ -185,7 +185,7 @@ _VDF_PATH_RE = re.compile(r'^\s*"path"\s+"(?P<path>.+?)"\s*$')
 
 
 def _vdf_string(raw: str) -> str:
-    """还原 VDF 里的反斜杠转义（``E:\\\\SteamLibrary`` → ``E:\\SteamLibrary``）。"""
+    """还原 VDF 里的反斜杠转义（``C:\\\\SteamLibrary`` → ``C:\\SteamLibrary``）。"""
     return raw.replace("\\\\", "\\")
 
 
