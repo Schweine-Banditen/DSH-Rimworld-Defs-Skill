@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Client half of the RimWorld Defs panel.
  *
  * Left: file-manager tree (source → category → defs). Right: tree view of the
@@ -363,7 +363,8 @@ window.__ModuleLoader__.load({
       chevronButton: { fontSize: 11, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer' },
       primaryButton: { fontSize: 12, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--dsw-alias-brand-primary)', background: 'var(--dsw-alias-brand-primary)', color: '#fff', cursor: 'pointer' },
       iconButton: { width: 30, height: 30, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer', fontSize: 15, lineHeight: 1 },
-      descEditor: { marginBottom: 10 },
+      saveCluster: { position: 'relative', display: 'flex', alignItems: 'center', gap: 8 },
+      descPopover: { position: 'absolute', top: 'calc(100% + 6px)', left: 0, width: 320, zIndex: 30, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-overlay)', boxShadow: '0 12px 32px rgba(0,0,0,.28)' },
       textarea: { width: '100%', boxSizing: 'border-box', resize: 'vertical', minHeight: 54, fontSize: 12.5, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', fontFamily: 'inherit' },
       notice: { color: 'var(--dsw-alias-label-secondary)', fontSize: 12, marginBottom: 8 },
       settingsMain: { position: 'relative', flex: 1, minWidth: 0, display: 'flex', minHeight: 0 },
@@ -524,6 +525,50 @@ window.__ModuleLoader__.load({
           },
           typeof children === 'function' ? children() : children,
         ),
+      )
+    }
+
+    /**
+     * 轻量浮层：只做 opacity / transform 过渡，不占据布局流。
+     * 收起后延迟卸载，保证有淡出；动画只走合成层，避免重排卡顿。
+     */
+    function PopLayer({ open, style, children }) {
+      const [mounted, setMounted] = useState(open)
+      const [shown, setShown] = useState(open)
+
+      useEffect(() => {
+        let first = 0
+        let second = 0
+        let timer = 0
+        if (open) {
+          setMounted(true)
+          first = requestAnimationFrame(() => {
+            second = requestAnimationFrame(() => setShown(true))
+          })
+        } else {
+          setShown(false)
+          timer = setTimeout(() => setMounted(false), 200)
+        }
+        return () => {
+          if (first) cancelAnimationFrame(first)
+          if (second) cancelAnimationFrame(second)
+          if (timer) clearTimeout(timer)
+        }
+      }, [open])
+
+      if (!mounted) return null
+      return h(
+        'div',
+        {
+          style: {
+            ...style,
+            opacity: shown ? 1 : 0,
+            transform: shown ? 'translateY(0)' : 'translateY(-4px)',
+            transition: 'opacity 180ms cubic-bezier(.2,.7,.3,1), transform 180ms cubic-bezier(.2,.7,.3,1)',
+            pointerEvents: open ? 'auto' : 'none',
+          },
+        },
+        children,
       )
     }
 
@@ -1042,6 +1087,7 @@ window.__ModuleLoader__.load({
       const [descOpen, setDescOpen] = useState(false)
       const [saveError, setSaveError] = useState('')
       const [notice, setNotice] = useState('')
+      const clusterRef = useRef(null)
 
       useEffect(() => {
         fetch(`${API}/keys`)
@@ -1070,6 +1116,16 @@ window.__ModuleLoader__.load({
         window.addEventListener('keydown', onKeyDown)
         return () => window.removeEventListener('keydown', onKeyDown)
       }, [dialogOpen])
+
+      useEffect(() => {
+        if (!descOpen) return undefined
+        const onPointerDown = (event) => {
+          if (clusterRef.current && clusterRef.current.contains(event.target)) return
+          setDescOpen(false)
+        }
+        document.addEventListener('mousedown', onPointerDown)
+        return () => document.removeEventListener('mousedown', onPointerDown)
+      }, [descOpen])
 
       const filtered = keys.filter((key) => {
         const needle = query.trim().toLowerCase()
@@ -1233,6 +1289,9 @@ window.__ModuleLoader__.load({
                   { style: styles.setBar },
                   h(
                     'div',
+                    { style: styles.saveCluster, ref: clusterRef },
+                  h(
+                    'div',
                     {
                       style: {
                         ...styles.nameField,
@@ -1267,6 +1326,23 @@ window.__ModuleLoader__.load({
                   ),
                   h('button', { style: styles.primaryButton, onClick: saveAs }, '保存'),
                   h(
+                    PopLayer,
+                    { open: descOpen, style: styles.descPopover },
+                    h(
+                      'div',
+                      { style: { fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)', marginBottom: 6 } },
+                      '翻译集描述（可选）',
+                    ),
+                    h('textarea', {
+                      style: styles.textarea,
+                      rows: 2,
+                      placeholder: '给这个翻译集写一句描述，会显示在翻译集列表里',
+                      value: newSetDesc,
+                      onChange: (event) => setNewSetDesc(event.target.value),
+                    }),
+                  ),
+                  ),
+                  h(
                     'button',
                     {
                       style: styles.iconButton,
@@ -1294,19 +1370,6 @@ window.__ModuleLoader__.load({
                     'span',
                     { style: styles.empty },
                     `临时集 ${translatedCount} 个字段${WORKING.source ? ` · 来自「${currentLabel}」` : ''}`,
-                  ),
-                ),
-                h(Collapse, { open: descOpen }, () =>
-                  h(
-                    'div',
-                    { style: styles.descEditor },
-                    h('textarea', {
-                      style: styles.textarea,
-                      rows: 2,
-                      placeholder: '给这个翻译集写一句描述（可选），会显示在翻译集列表里',
-                      value: newSetDesc,
-                      onChange: (event) => setNewSetDesc(event.target.value),
-                    }),
                   ),
                 ),
                 notice ? h('div', { style: styles.notice }, notice) : null,
