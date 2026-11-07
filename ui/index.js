@@ -8,7 +8,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { resolve as resolvePath, join, sep } from 'node:path'
-import { PACKAGE_DIR, resolvePaths } from './paths.js'
+import { PACKAGE_DIR, REPO_ROOT, resolvePaths } from './paths.js'
 import { TOOL_CATALOG, createTools } from './tools.js'
 
 export const name = 'rimworld-defs-ui'
@@ -426,6 +426,23 @@ export function apply(ctx, config = {}) {
       } catch (error) {
         return json({ error: `preset unavailable: ${error.message}` }, 503)
       }
+    }
+    if (path === `${API_PREFIX}/brand`) {
+      // 空状态用图：优先 webp logo，其次 png 备选；都没有就 404，前端回落为纯文字。
+      for (const [fileName, contentType] of [
+        ['brand.webp', 'image/webp'],
+        ['brand.png', 'image/png'],
+      ]) {
+        try {
+          const bytes = readFileSync(join(REPO_ROOT, 'assets', fileName))
+          return new Response(bytes, {
+            headers: { 'content-type': contentType, 'cache-control': 'max-age=86400' },
+          })
+        } catch {
+          /* 换下一个候选 */
+        }
+      }
+      return new Response('no brand image', { status: 404 })
     }
     if (path === `${API_PREFIX}/tools`) {
       return json({ tools: TOOL_CATALOG, registered: registeredTools })
