@@ -267,7 +267,7 @@ export function apply(ctx, config = {}) {
       const payload = loadWorkshopMod(mod.id, state)
       if (!payload) continue
       const items = (payload.defs || [])
-        .filter((record) => record.defName || record.Name)
+        .filter((record) => (record.defName || record.Name) && record.Abstract !== true)
         .map((record) => ({
           defName: record.defName || record.Name,
           defType: record.defType,
@@ -363,7 +363,7 @@ export function apply(ctx, config = {}) {
       const payload = loadMineFolder(folder.id, state)
       if (!payload) continue
       const items = (payload.defs || [])
-        .filter((record) => record.defName || record.Name)
+        .filter((record) => (record.defName || record.Name) && record.Abstract !== true)
         .map((record) => ({
           defName: record.defName || record.Name,
           defType: record.defType,

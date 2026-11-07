@@ -2007,7 +2007,8 @@ window.__ModuleLoader__.load({
       const [query, setQuery] = useState('')
       const [results, setResults] = useState([])
       const [searching, setSearching] = useState(false)
-      const [expanded, setExpanded] = useState({ Core: true })
+      // 默认全部收起：进入面板时不再自动拉开 Core。
+      const [expanded, setExpanded] = useState({})
       const [selected, setSelected] = useState(null)
       const [record, setRecord] = useState(null)
       const [error, setError] = useState(null)
