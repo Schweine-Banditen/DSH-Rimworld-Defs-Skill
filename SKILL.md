@@ -44,9 +44,9 @@ description: 查询 RimWorld（环世界）原版与官方 DLC 的 Def 定义资
 
 ## 查询方式
 
-### 优先：Skill 工具
+### 工具：尚未接入（当前请用命令行）
 
-若接入层已注册以下工具，直接调用：
+下面四个工具是目标形态，**尚未注册到会话**（见 `AGENTS.md` §7.2）。现在一律执行下一节的命令行；工具接入后参数与语义保持不变。
 
 | 工具 | 参数 | 用途 |
 | --- | --- | --- |
@@ -55,9 +55,9 @@ description: 查询 RimWorld（环世界）原版与官方 DLC 的 Def 定义资
 | `list_by_source` | `source`、`limit` | 按 DLC/来源列出 |
 | `list_by_category` | `category`、`thingCategories`、`defType`、`limit` | 按分类组合过滤 |
 
-### 回退：命令行
+### 当前可用：命令行
 
-工具不可用时，在仓库根目录（即 Base directory）执行：
+在仓库根目录（即 Base directory）执行：
 
 ```bash
 python scripts/query_defs.py search-def Steel
@@ -78,6 +78,8 @@ search_def("Gun_Revolver") → 若无结果，说明拼写错误或该 Def 来�
 有结果时看 defType、source（Core/DLC）、sourcePath。
 ```
 
+CLI：`python scripts/query_defs.py search-def Gun_Revolver`
+
 **2. 写 ``<PatchOperationReplace>`` 前确认父级**
 
 ```
@@ -85,11 +87,15 @@ search_def("Apparel_PowerArmor") → 看 parentChain 与 parentResolved；
 parentResolved 为 false 时不要假设字段齐全。
 ```
 
+CLI：`python scripts/query_defs.py search-def Apparel_PowerArmor`
+
 **3. 查分类（写 recipe 的 thingCategories、筛选建筑）**
 
 ```
 list_by_category(defType="ThingDef", thingCategories=["ResourcesRaw"])
 ```
+
+CLI：`python scripts/query_defs.py list-category --category Item --thing-categories ResourcesRaw --def-type ThingDef`
 
 注意：`category` 常写在抽象基类上，工具返回的 `categoryDepth`/`categoryFrom` 表示继承来源；`category` 与 `thingCategories` 是两个维度，不能互相替代。
 
@@ -99,6 +105,8 @@ list_by_category(defType="ThingDef", thingCategories=["ResourcesRaw"])
 search_by_label("钢") / search_by_label("steel")
 ```
 
+CLI：`python scripts/query_defs.py search-label 钢 --limit 10`
+
 结果里的 `matchedField` 告诉你命中的是 `label`、`labelZh`、`title` 还是 `defName`。
 
 **5. 查贴图路径**
@@ -107,6 +115,8 @@ search_by_label("钢") / search_by_label("steel")
 search_def("Steel") → graphic.effective.texPath
 ```
 
+CLI：`python scripts/query_defs.py search-def Steel --def-type ThingDef`
+
 `effective` 是沿父链解析出的有效贴图；`own: false` 表示图来自祖先。贴图文件在游戏根目录 `Assets.zip`，不在 `data/` 里。
 
 **6. 判断内容是否来自 DLC**
@@ -114,6 +124,8 @@ search_def("Steel") → graphic.effective.texPath
 ```
 list_by_source("Royalty") / 看 def 的 source 与 MayRequire
 ```
+
+CLI：`python scripts/query_defs.py list-source Royalty --limit 20`
 
 `source` 严格按文件路径判定；`MayRequire` 只是原始条件。
 
