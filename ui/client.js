@@ -429,6 +429,9 @@ window.__ModuleLoader__.load({
       modalDesc: { fontSize: 12.5, lineHeight: 1.7, whiteSpace: 'pre-wrap', color: 'var(--dsw-alias-label-primary)' },
       modalActions: { display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '12px 18px', borderTop: '1px solid var(--dsw-alias-border-l1)' },
       mineRow: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)' },
+      basicCard: { display: 'flex', flexDirection: 'column', gap: 6, padding: '12px 14px', marginTop: 12, borderRadius: 10, border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)' },
+      basicLabel: { fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' },
+      basicPath: { fontSize: 12, fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', wordBreak: 'break-all', color: 'var(--dsw-alias-label-secondary)' },
       table: { width: '100%', borderCollapse: 'collapse', fontSize: 12.5 },
       th: { textAlign: 'left', color: 'var(--dsw-alias-label-secondary)', fontWeight: 600, padding: '6px 8px', borderBottom: '1px solid var(--dsw-alias-border-l2)' },
       td: { padding: '4px 8px', borderBottom: '1px solid var(--dsw-alias-border-l1)', verticalAlign: 'middle' },
@@ -1166,6 +1169,128 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /** 基础设置：中间数据（JSON）保存位置。 */
+    function BasicSettingsPanel({ onIndexChanged }) {
+      const [data, setData] = useState(null)
+      const [dir, setDir] = useState('')
+      const [busy, setBusy] = useState('')
+      const [error, setError] = useState('')
+      const [notice, setNotice] = useState('')
+
+      const load = useCallback(() => {
+        fetch(`${API}/settings/basic`)
+          .then(readJsonResponse)
+          .then((payload) => {
+            setData(payload)
+            setDir(payload.dataDir || '')
+          })
+          .catch((err) => setError(String(err)))
+      }, [])
+
+      useEffect(() => {
+        load()
+      }, [load])
+
+      const save = async () => {
+        const target = dir.trim()
+        if (!target) {
+          setError('请填写数据目录')
+          return
+        }
+        setBusy('save')
+        setError('')
+        try {
+          const payload = await readJsonResponse(await fetch(`${API}/settings/basic/set?dir=${encodeURIComponent(target)}`))
+          setData(payload)
+          setDir(payload.dataDir)
+          setNotice(`已保存：${payload.dataPath.value}`)
+        } catch (err) {
+          setError(String(err.message || err))
+        } finally {
+          setBusy('')
+        }
+      }
+
+      const regenerate = async () => {
+        setBusy('regen')
+        setError('')
+        try {
+          const payload = await readJsonResponse(await fetch(`${API}/settings/basic/regenerate`))
+          setData(payload.settings)
+          setDir(payload.settings.dataDir)
+          onIndexChanged?.()
+          setNotice(`已重新生成：${payload.settings.dataPath.value}`)
+        } catch (err) {
+          setError(String(err.message || err))
+        } finally {
+          setBusy('')
+        }
+      }
+
+      const sourceLabels = { env: '环境变量', local: '本机配置', config: 'bundle 配置', derived: '默认位置' }
+      const file = data && data.dataPath
+
+      return h(
+        'div',
+        null,
+        h(
+          PaneHeader,
+          { scrolled: false },
+          h('div', { style: { fontSize: 15, fontWeight: 600 } }, '基础设置'),
+          h('span', { style: styles.empty }, '中间数据文件（defs JSON）的保存位置；工坊与我的模组的数据也跟随该目录。'),
+        ),
+        error ? h('div', { style: styles.saveError }, error) : null,
+        notice ? h('div', { style: styles.notice }, notice) : null,
+        file
+          ? h(
+              'div',
+              { style: styles.basicCard },
+              h('div', { style: styles.basicLabel }, '当前数据文件'),
+              h('div', { style: styles.basicPath }, file.value),
+              h(
+                'div',
+                { style: styles.workshopMeta },
+                `来源：${sourceLabels[file.source] || file.source}`,
+                file.exists
+                  ? h('span', { style: styles.badgeOk }, '已生成')
+                  : h('span', { style: styles.badgeWarn }, '尚未生成'),
+                `默认：${data.defaultDataPath}`,
+              ),
+            )
+          : null,
+        h(
+          'div',
+          { style: styles.basicCard },
+          h('div', { style: styles.basicLabel }, '数据目录'),
+          h(
+            'div',
+            { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
+            h('input', {
+              style: { ...styles.input, flex: 1, minWidth: 280 },
+              value: dir,
+              placeholder: '例如 E:\\RimWorldDefs\\data',
+              onChange: (event) => setDir(event.target.value),
+              onKeyDown: (event) => {
+                if (event.key === 'Enter') save()
+              },
+              'aria-label': '数据目录',
+            }),
+            h('button', { style: styles.primaryButton, onClick: save, disabled: busy === 'save' }, busy === 'save' ? '保存中…' : '保存'),
+            h(
+              'button',
+              { style: styles.button, onClick: regenerate, disabled: busy === 'regen' },
+              busy === 'regen' ? '生成中…' : '重新生成数据',
+            ),
+          ),
+          h(
+            'div',
+            { style: styles.empty },
+            '保存后若新目录还没有数据文件，点「重新生成数据」（会重新扫描游戏与已拉取的模组）；也可以手动把原目录的 rimworld-defs.json 复制过去。',
+          ),
+        ),
+      )
+    }
+
     /** 创意工坊：检测 / 拉取 / 删除。检测只读元数据，拉取才解析 Defs。 */
     function WorkshopPanel({ onIndexChanged }) {
       const [data, setData] = useState(null)
@@ -1722,6 +1847,7 @@ window.__ModuleLoader__.load({
           'div',
           { style: styles.settingsTabs },
           [
+            { id: 'basic', label: '基础设置' },
             { id: 'translation', label: '静态字段' },
             { id: 'workshop', label: '创意工坊' },
             { id: 'mymods', label: '我的模组' },
@@ -1752,7 +1878,9 @@ window.__ModuleLoader__.load({
               setScrolled(top > 4)
             },
           },
-          tab === 'tools'
+          tab === 'basic'
+            ? h(BasicSettingsPanel, { onIndexChanged })
+            : tab === 'tools'
             ? h(ToolSettings, { info: toolInfo, scrolled })
             : tab === 'workshop'
               ? h(WorkshopPanel, { onIndexChanged })
