@@ -333,6 +333,51 @@ def _game_root_from_data(data_file: str | Path | None) -> Path | None:
 
 
 # ----------------------------------------------------------------------
+# 创意工坊
+# ----------------------------------------------------------------------
+
+# RimWorld 的 Steam AppID；创意工坊内容在 <steamapps>/workshop/content/<appid>/<modId>。
+WORKSHOP_APP_ID = "294100"
+
+
+def workshop_roots(game_root: str | Path | None = None) -> list[Path]:
+    """返回本机可能的创意工坊内容目录（去重，按优先级）。
+
+    先看游戏本体所在的 ``steamapps``（多数情况就够），再看注册表里的每个
+    Steam 库——工坊内容与游戏装在不同库是会发生的。
+    """
+    roots: list[Path] = []
+    seen: set[str] = set()
+
+    def add(steamapps: Path) -> None:
+        candidate = steamapps / "workshop" / "content" / WORKSHOP_APP_ID
+        key = str(candidate).casefold()
+        if key in seen:
+            return
+        seen.add(key)
+        roots.append(candidate)
+
+    if game_root is not None:
+        for parent in Path(game_root).expanduser().parents:
+            if parent.name.lower() == "steamapps":
+                add(parent)
+                break
+    for steam_root in _registry_steam_paths():
+        add(steam_root / "steamapps")
+        for library in library_folders(steam_root):
+            add(library / "steamapps")
+    return roots
+
+
+def workshop_content_dir(game_root: str | Path | None = None) -> Path | None:
+    """返回第一个真实存在的创意工坊内容目录；都没有时返回 ``None``。"""
+    for candidate in workshop_roots(game_root):
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+# ----------------------------------------------------------------------
 # CLI 自检
 # ----------------------------------------------------------------------
 

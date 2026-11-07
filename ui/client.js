@@ -388,6 +388,17 @@ window.__ModuleLoader__.load({
       currentBadge: { fontSize: 10.5, padding: '0 6px', borderRadius: 999, border: '1px solid var(--dsw-alias-brand-primary)', color: 'var(--dsw-alias-brand-primary)' },
       setDelete: { fontSize: 11.5, padding: '3px 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer' },
       setLocked: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' },
+      workshopGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12, marginTop: 12 },
+      workshopCard: { display: 'flex', gap: 10, padding: 10, borderRadius: 10, border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', minWidth: 0 },
+      workshopThumb: { width: 72, height: 72, borderRadius: 8, objectFit: 'cover', flex: '0 0 auto', background: 'var(--dsw-alias-bg-layer-2)' },
+      workshopBody: { minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 },
+      workshopName: { fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+      workshopMeta: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' },
+      workshopDesc: { fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.5, maxHeight: 50, overflow: 'hidden' },
+      workshopActions: { display: 'flex', gap: 6, marginTop: 'auto', paddingTop: 6, justifyContent: 'flex-end' },
+      badgeOk: { fontSize: 10.5, padding: '0 6px', borderRadius: 999, border: '1px solid var(--dsw-alias-brand-primary)', color: 'var(--dsw-alias-brand-primary)' },
+      badgeWarn: { fontSize: 10.5, padding: '0 6px', borderRadius: 999, border: '1px solid var(--dsw-alias-state-warn-primary)', color: 'var(--dsw-alias-state-warn-primary)' },
+      updateButton: { fontSize: 12, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--dsw-alias-state-warn-primary)', background: 'transparent', color: 'var(--dsw-alias-state-warn-primary)', cursor: 'pointer' },
       table: { width: '100%', borderCollapse: 'collapse', fontSize: 12.5 },
       th: { textAlign: 'left', color: 'var(--dsw-alias-label-secondary)', fontWeight: 600, padding: '6px 8px', borderBottom: '1px solid var(--dsw-alias-border-l2)' },
       td: { padding: '4px 8px', borderBottom: '1px solid var(--dsw-alias-border-l1)', verticalAlign: 'middle' },
@@ -883,7 +894,7 @@ window.__ModuleLoader__.load({
           return
         }
         setXmlState({ anchor, text: '加载 XML…', loading: true })
-        fetch(`${API}/xml?path=${encodeURIComponent(path)}`)
+        fetch(`${API}/xml?path=${encodeURIComponent(path)}&source=${encodeURIComponent(record.source || '')}`)
           .then((response) => (response.ok ? response.text() : Promise.reject(new Error(`HTTP ${response.status}`))))
           .then((text) => {
             XML_CACHE.set(path, text)
@@ -1125,7 +1136,154 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function SettingsPanel({ onBack }) {
+    /** 创意工坊：检测 / 拉取 / 删除。检测只读元数据，拉取才解析 Defs。 */
+    function WorkshopPanel({ onIndexChanged }) {
+      const [data, setData] = useState(null)
+      const [busy, setBusy] = useState('')
+      const [error, setError] = useState('')
+      const [notice, setNotice] = useState('')
+
+      const loadState = useCallback(() => {
+        fetch(`${API}/workshop/state`)
+          .then((response) => response.json())
+          .then((payload) => setData(payload))
+          .catch((err) => setError(String(err)))
+      }, [])
+
+      useEffect(() => {
+        loadState()
+      }, [loadState])
+
+      const detect = async () => {
+        setBusy('detect')
+        setError('')
+        setNotice('')
+        try {
+          const response = await fetch(`${API}/workshop/detect`, { method: 'POST' })
+          const payload = await response.json()
+          if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`)
+          setData(payload)
+          setNotice(`检测完成：${(payload.mods || []).length} 个模组`)
+        } catch (err) {
+          setError(String(err.message || err))
+        } finally {
+          setBusy('')
+        }
+      }
+
+      const pull = async (id) => {
+        setBusy(id)
+        setError('')
+        try {
+          const response = await fetch(`${API}/workshop/pull?id=${encodeURIComponent(id)}`, { method: 'POST' })
+          const payload = await response.json()
+          if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`)
+          await loadState()
+          onIndexChanged?.()
+          setNotice(`已拉取「${payload.mod.name}」：${payload.mod.defsCount} 个 Def`)
+        } catch (err) {
+          setError(String(err.message || err))
+        } finally {
+          setBusy('')
+        }
+      }
+
+      const remove = async (id) => {
+        setBusy(id)
+        setError('')
+        try {
+          const response = await fetch(`${API}/workshop/remove?id=${encodeURIComponent(id)}`, { method: 'POST' })
+          if (!response.ok) throw new Error(`HTTP ${response.status}`)
+          await loadState()
+          onIndexChanged?.()
+          setNotice('已删除，文件树中不再显示')
+        } catch (err) {
+          setError(String(err.message || err))
+        } finally {
+          setBusy('')
+        }
+      }
+
+      const mods = (data && data.mods) || []
+
+      return h(
+        'div',
+        null,
+        h(
+          PaneHeader,
+          { scrolled: false },
+          h('div', { style: { fontSize: 15, fontWeight: 600 } }, '创意工坊'),
+          h('span', { style: styles.empty }, '检测只读取元数据；点「拉取」才会解析该模组的 Defs 并加入文件树。'),
+          h(
+            'button',
+            { style: { ...styles.primaryButton, marginLeft: 'auto' }, onClick: detect, disabled: busy === 'detect' },
+            busy === 'detect' ? '检测中…' : '检测工坊',
+          ),
+        ),
+        error ? h('div', { style: styles.saveError }, error) : null,
+        notice ? h('div', { style: styles.notice }, notice) : null,
+        data && data.lastDetect
+          ? h('div', { style: styles.empty }, `上次检测：${new Date(data.lastDetect).toLocaleString()} · ${mods.length} 个模组`)
+          : h('div', { style: styles.empty }, '尚未检测。点右上角「检测工坊」读取已订阅的模组。'),
+        h(
+          'div',
+          { style: styles.workshopGrid },
+          mods.map((mod) =>
+            h(
+              'div',
+              { key: mod.id, style: styles.workshopCard },
+              h('img', {
+                src: `${API}/workshop/preview?id=${encodeURIComponent(mod.id)}`,
+                alt: mod.name,
+                style: styles.workshopThumb,
+                onError: (event) => {
+                  if (event.currentTarget.src !== `${location.origin}${PLACEHOLDER}`) event.currentTarget.src = PLACEHOLDER
+                },
+              }),
+              h(
+                'div',
+                { style: styles.workshopBody },
+                h('div', { style: styles.workshopName }, mod.name),
+                h(
+                  'div',
+                  { style: styles.workshopMeta },
+                  `${mod.author || '未知作者'} · ${mod.updatedAt ? mod.updatedAt.slice(0, 10) : mod.version || '版本未知'}`,
+                  mod.missing ? h('span', { style: styles.badgeWarn }, '工坊中未找到') : null,
+                  mod.pulled ? h('span', { style: styles.badgeOk }, `已拉取 ${mod.defsCount || 0}`) : null,
+                ),
+                h('div', { style: styles.workshopDesc }, mod.description || '（无描述）'),
+                h(
+                  'div',
+                  { style: styles.workshopActions },
+                  mod.pulled
+                    ? [
+                        mod.updateAvailable
+                          ? h(
+                              'button',
+                              { key: 'update', style: styles.updateButton, onClick: () => pull(mod.id), disabled: busy === mod.id },
+                              busy === mod.id ? '更新中…' : '更新',
+                            )
+                          : null,
+                        h(
+                          'button',
+                          { key: 'remove', style: styles.button, onClick: () => remove(mod.id), disabled: busy === mod.id },
+                          '删除',
+                        ),
+                      ]
+                    : h(
+                        'button',
+                        { style: styles.button, onClick: () => pull(mod.id), disabled: busy === mod.id },
+                        busy === mod.id ? '拉取中…' : '拉取',
+                      ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      )
+    }
+
+    function SettingsPanel({ onBack, onIndexChanged }) {
       const [tab, setTab] = useState('translation')
       const [keys, setKeys] = useState([])
       const [query, setQuery] = useState('')
@@ -1302,6 +1460,7 @@ window.__ModuleLoader__.load({
           { style: styles.settingsTabs },
           [
             { id: 'translation', label: '静态字段' },
+            { id: 'workshop', label: '创意工坊' },
             { id: 'tools', label: '智能体工具' },
           ].map((item) =>
             h(
@@ -1331,7 +1490,9 @@ window.__ModuleLoader__.load({
           },
           tab === 'tools'
             ? h(ToolSettings, { info: toolInfo, scrolled })
-            : h(
+            : tab === 'workshop'
+              ? h(WorkshopPanel, { onIndexChanged })
+              : h(
                 'div',
                 null,
                 h(
@@ -1586,13 +1747,17 @@ window.__ModuleLoader__.load({
       const [error, setError] = useState(null)
       const [view, setView] = useState('defs')
 
-      useEffect(() => {
-        fetch(`${API}/meta`).then((r) => r.json()).then(setMeta).catch((e) => setError(String(e)))
+      const loadIndex = useCallback(() => {
         fetch(`${API}/index`)
           .then((r) => r.json())
           .then((payload) => setSources(payload.sources || []))
           .catch((e) => setError(String(e)))
       }, [])
+
+      useEffect(() => {
+        fetch(`${API}/meta`).then((r) => r.json()).then(setMeta).catch((e) => setError(String(e)))
+        loadIndex()
+      }, [loadIndex])
 
       useEffect(() => {
         if (!selected) return undefined
@@ -1701,7 +1866,7 @@ window.__ModuleLoader__.load({
           : null,
         error ? h('div', { style: { ...styles.empty, padding: 16 } }, `加载失败：${error}`) : null,
         view === 'settings'
-          ? h(SettingsPanel, { onBack: () => setView('defs') })
+          ? h(SettingsPanel, { onBack: () => setView('defs'), onIndexChanged: loadIndex })
           : h(
               'div',
               { style: styles.body },

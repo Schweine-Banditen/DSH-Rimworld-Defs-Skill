@@ -5,8 +5,8 @@
  * quick search and rendered item textures. Textures come from Assets.zip as
  * split DDS compressed with ZSTD; the project's Python renderer decodes them.
  */
-import { existsSync, readFileSync, statSync } from 'node:fs'
-import { spawn } from 'node:child_process'
+import { mkdirSync, existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { execFile, spawn } from 'node:child_process'
 import { resolve as resolvePath, join, sep } from 'node:path'
 import { PACKAGE_DIR, REPO_ROOT, resolvePaths } from './paths.js'
 import { TOOL_CATALOG, createTools } from './tools.js'
@@ -144,6 +144,179 @@ export function apply(ctx, config = {}) {
     )
   }
 
+  // ---- 创意工坊：状态 + 检测 / 拉取 / 删除（不做任何自动爬取）----
+  const dataDir = join(REPO_ROOT, 'data')
+  const workshopDir = join(dataDir, 'workshop')
+  const workshopStatePath = join(dataDir, 'workshop-state.json')
+  const workshopScript = join(REPO_ROOT, 'scripts', 'workshop_defs.py')
+  const workshopCache = new Map()
+
+  function readWorkshopState() {
+    try {
+      const parsed = JSON.parse(readFileSync(workshopStatePath, 'utf8'))
+      if (parsed && typeof parsed === 'object' && parsed.mods && typeof parsed.mods === 'object') return parsed
+    } catch {
+      /* 状态文件缺失或损坏：从空状态开始 */
+    }
+    return { mods: {}, lastDetect: null, contentDir: null, gameMajor: null }
+  }
+
+  function writeWorkshopState(state) {
+    mkdirSync(dataDir, { recursive: true })
+    writeFileSync(workshopStatePath, `${JSON.stringify(state, null, 2)}\n`, 'utf8')
+  }
+
+  /** 跑一次 Python 脚本并返回 stdout；失败时把 stderr 原文抛出来。 */
+  function runPython(args, timeoutMs) {
+    return new Promise((resolve, reject) => {
+      execFile(
+        pythonExe,
+        args,
+        { windowsHide: true, timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8' },
+        (error, stdout, stderr) => {
+          if (error) {
+            if (error.code === 'ENOENT') {
+              reject(new Error(`找不到 Python 解释器「${pythonExe}」`))
+              return
+            }
+            reject(new Error(String(stderr || '').trim() || error.message))
+            return
+          }
+          resolve(String(stdout || ''))
+        },
+      )
+    })
+  }
+
+  /** 检测工坊模组，并把结果与已有状态合并（保留已拉取但暂时缺失的模组）。 */
+  async function detectWorkshopMods() {
+    mkdirSync(workshopDir, { recursive: true })
+    const outFile = join(workshopDir, `detect-${Date.now()}.json`)
+    await runPython(
+      [workshopScript, 'list', '--json', '--out', outFile, ...(gameRoot ? ['--game', gameRoot] : [])],
+      120000,
+    )
+    const detected = JSON.parse(readFileSync(outFile, 'utf8'))
+    try {
+      unlinkSync(outFile)
+    } catch {
+      /* 忽略清理失败 */
+    }
+
+    const state = readWorkshopState()
+    const next = {}
+    for (const mod of detected.mods || []) {
+      const previous = state.mods[mod.id] || {}
+      const pulled = previous.pulled === true
+      next[mod.id] = {
+        ...mod,
+        pulled,
+        pulledAt: previous.pulledAt || null,
+        defsCount: previous.defsCount || 0,
+        missing: false,
+        // 已拉取且 manifest 变化 → 前端显示黄色「更新」
+        updateAvailable: pulled && Boolean(previous.manifest) && previous.manifest !== mod.manifest,
+      }
+    }
+    for (const [id, previous] of Object.entries(state.mods)) {
+      if (next[id]) continue
+      // 已拉取的保留（标注 missing）；未拉取的记录直接丢弃。
+      if (previous.pulled === true) next[id] = { ...previous, missing: true, updateAvailable: false }
+    }
+
+    const merged = {
+      mods: Object.fromEntries(Object.entries(next).sort((a, b) => a[1].name.localeCompare(b[1].name))),
+      lastDetect: new Date().toISOString(),
+      contentDir: detected.contentDir || state.contentDir || null,
+      gameMajor: detected.gameMajor || state.gameMajor || null,
+    }
+    writeWorkshopState(merged)
+    return merged
+  }
+
+  function statePayload(state) {
+    return {
+      contentDir: state.contentDir || null,
+      gameMajor: state.gameMajor || null,
+      lastDetect: state.lastDetect || null,
+      mods: Object.values(state.mods || {}),
+    }
+  }
+
+  /** 读取已拉取的模组 Defs 文件（带 mtime 缓存）。 */
+  function loadWorkshopMod(id, state) {
+    const entry = (state || readWorkshopState()).mods[id]
+    if (!entry || entry.pulled !== true) return null
+    const file = join(workshopDir, `${id}.json`)
+    if (!existsSync(file)) return null
+    const mtimeMs = statSync(file).mtimeMs
+    const cached = workshopCache.get(id)
+    if (cached && cached.mtimeMs === mtimeMs) return cached.payload
+    const payload = JSON.parse(readFileSync(file, 'utf8'))
+    workshopCache.set(id, { mtimeMs, payload })
+    return payload
+  }
+
+  /** 创意工坊贴图：模组自带的 PNG/JPG，按 texPath 在 Textures 下查找。 */
+  /** 把已拉取的工坊模组挂到索引里：一个 "Mods" 来源，按模组分组，不再细分。 */
+  function appendWorkshopIndex(sources) {
+    const state = readWorkshopState()
+    const groups = []
+    for (const mod of Object.values(state.mods || {})) {
+      if (mod.pulled !== true) continue
+      const payload = loadWorkshopMod(mod.id, state)
+      if (!payload) continue
+      const items = (payload.defs || [])
+        .filter((record) => record.defName || record.Name)
+        .map((record) => ({
+          defName: record.defName || record.Name,
+          defType: record.defType,
+          label: record.labelZh || record.label || record.titleZh || record.title || record.defName || record.Name || '',
+        }))
+      if (items.length === 0) continue
+      items.sort((a, b) => (a.label || a.defName).localeCompare(b.label || b.defName))
+      groups.push({ key: `mod:${mod.id}`, label: mod.name || mod.id, count: items.length, items })
+    }
+    if (groups.length === 0) return
+    sources.push({ name: 'Mods', count: groups.reduce((sum, group) => sum + group.count, 0), groups })
+  }
+
+  /** 在已拉取的工坊模组里按 defName/Name + defType 找一条记录。 */
+  function findWorkshopDef(name, defType) {
+    const state = readWorkshopState()
+    for (const mod of Object.values(state.mods || {})) {
+      if (mod.pulled !== true) continue
+      const payload = loadWorkshopMod(mod.id, state)
+      if (!payload) continue
+      const hit = (payload.defs || []).find(
+        (record) =>
+          (record.defName === name || record.Name === name) &&
+          (!defType || String(record.defType || '').toLowerCase() === defType.toLowerCase()),
+      )
+      if (hit) return hit
+    }
+    return null
+  }
+
+  function workshopTexture(id, texPath, state) {
+    const entry = (state || readWorkshopState()).mods[id]
+    const contentDir = (state || readWorkshopState()).contentDir
+    if (!entry || !contentDir) return null
+    const modDir = join(contentDir, id)
+    const base = String(texPath || '').replace(/^\/+/, '').replace(/\\/g, '/')
+    const rel = base.startsWith('Textures/') ? base : `Textures/${base}`
+    const candidates = [join(modDir, rel), entry.defsDir ? join(modDir, entry.defsDir, '..', rel) : null].filter(Boolean)
+    for (const candidate of candidates) {
+      for (const extension of ['.png', '.jpg', '.jpeg']) {
+        const file = `${candidate}${extension}`
+        if (existsSync(file)) {
+          return { bytes: readFileSync(file), type: extension === '.png' ? 'image/png' : 'image/jpeg' }
+        }
+      }
+    }
+    return null
+  }
+
   // 智能体工具：注册四个查询。用作用域 inject 而不是顶层 inject —— 缺少 tools
   // 服务的环境（headless / 精简 profile）不应该连面板路由一起消失。
   const registeredTools = []
@@ -165,7 +338,7 @@ export function apply(ctx, config = {}) {
 
   let cache = { mtimeMs: 0, payload: null, index: null, lookup: null }
   const iconCache = new Map()
-  const TEX_PATTERN = /^[A-Za-z0-9 _\-/.]+$/
+  const TEX_PATTERN = /^[A-Za-z0-9 _\-/.:]+$/
 
   function loadData() {
     if (!dataPath) throw new Error('尚未解析到数据文件路径')
@@ -365,17 +538,85 @@ export function apply(ctx, config = {}) {
     }
     if (path === `${API_PREFIX}/index`) {
       const { payload } = loadData()
-      return json({ notice: notice(payload), groups: GROUPS, sources: buildIndex(payload) })
+      const sources = buildIndex(payload)
+      appendWorkshopIndex(sources)
+      return json({ notice: notice(payload), groups: GROUPS, sources })
+    }
+    if (path === `${API_PREFIX}/workshop/state`) {
+      return json(statePayload(readWorkshopState()))
+    }
+    if (path === `${API_PREFIX}/workshop/detect` && request.method === 'POST') {
+      try {
+        return json(statePayload(await detectWorkshopMods()))
+      } catch (error) {
+        return json({ error: `检测失败：${error.message}` }, 502)
+      }
+    }
+    if ((path === `${API_PREFIX}/workshop/pull` || path === `${API_PREFIX}/workshop/update`) && request.method === 'POST') {
+      const id = url.searchParams.get('id') || ''
+      if (!/^\d+$/.test(id)) return json({ error: 'bad id' }, 400)
+      const state = readWorkshopState()
+      const entry = state.mods[id]
+      if (!entry) return json({ error: '该模组不在检测结果中，请先检测' }, 404)
+      try {
+        mkdirSync(workshopDir, { recursive: true })
+        const outFile = join(workshopDir, `${id}.json`)
+        await runPython(
+          [workshopScript, 'extract', '--id', id, '--out', outFile, ...(gameRoot ? ['--game', gameRoot] : [])],
+          180000,
+        )
+        const payload = JSON.parse(readFileSync(outFile, 'utf8'))
+        entry.pulled = true
+        entry.pulledAt = new Date().toISOString()
+        entry.defsCount = (payload.defs || []).length
+        entry.missing = false
+        entry.updateAvailable = false
+        writeWorkshopState(state)
+        workshopCache.delete(id)
+        return json({ mod: entry })
+      } catch (error) {
+        return json({ error: `拉取失败：${error.message}` }, 502)
+      }
+    }
+    if (path === `${API_PREFIX}/workshop/remove` && request.method === 'POST') {
+      const id = url.searchParams.get('id') || ''
+      if (!/^\d+$/.test(id)) return json({ error: 'bad id' }, 400)
+      const state = readWorkshopState()
+      delete state.mods[id]
+      writeWorkshopState(state)
+      try {
+        unlinkSync(join(workshopDir, `${id}.json`))
+      } catch {
+        /* 文件可能已不存在 */
+      }
+      workshopCache.delete(id)
+      return json({ ok: true })
+    }
+    if (path === `${API_PREFIX}/workshop/preview`) {
+      const id = url.searchParams.get('id') || ''
+      const state = readWorkshopState()
+      const entry = state.mods[id]
+      if (!/^\d+$/.test(id) || !entry || !entry.preview || !state.contentDir) {
+        return new Response('no preview', { status: 404 })
+      }
+      try {
+        const bytes = readFileSync(join(state.contentDir, id, entry.preview))
+        const type = entry.preview.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg'
+        return new Response(bytes, { headers: { 'content-type': type, 'cache-control': 'max-age=3600' } })
+      } catch {
+        return new Response('no preview', { status: 404 })
+      }
     }
     if (path === `${API_PREFIX}/def`) {
       const { payload } = loadData()
       const name = url.searchParams.get('name') || ''
       const defType = url.searchParams.get('type') || ''
-      const record = (payload.defs || []).find(
+      let record = (payload.defs || []).find(
         (item) =>
           item.defName === name &&
           (!defType || String(item.defType || '').toLowerCase() === defType.toLowerCase()),
       )
+      if (!record) record = findWorkshopDef(name, defType)
       if (!record) return json({ error: 'not found', name, defType }, 404)
       return json({ notice: notice(payload), record })
     }
@@ -449,9 +690,27 @@ export function apply(ctx, config = {}) {
     }
     if (path === `${API_PREFIX}/xml`) {
       const rel = url.searchParams.get('path') || ''
-      if (!rel.startsWith('Data/') || !rel.endsWith('.xml') || rel.includes('..')) {
-        return new Response('bad path', { status: 400 })
+      const source = url.searchParams.get('source') || ''
+      if (!rel.endsWith('.xml') || rel.includes('..')) return new Response('bad path', { status: 400 })
+
+      if (source.startsWith('workshop:')) {
+        const id = source.slice('workshop:'.length)
+        const state = readWorkshopState()
+        if (!/^\d+$/.test(id) || !state.contentDir) return new Response('bad source', { status: 400 })
+        const root = resolvePath(state.contentDir, id)
+        const full = resolvePath(root, rel)
+        if (!full.startsWith(root + sep)) return new Response('bad path', { status: 400 })
+        try {
+          if (statSync(full).size > 4 * 1024 * 1024) return new Response('file too large', { status: 413 })
+          return new Response(readFileSync(full, 'utf8'), {
+            headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+          })
+        } catch {
+          return new Response('not found', { status: 404 })
+        }
       }
+
+      if (!rel.startsWith('Data/')) return new Response('bad path', { status: 400 })
       if (!gameRoot) {
         return json({ error: '未找到 RimWorld 目录，无法读取 XML', paths: pathSummary(paths) }, 503)
       }
@@ -473,6 +732,13 @@ export function apply(ctx, config = {}) {
       const source = url.searchParams.get('source') || 'Core'
       if (!TEX_PATTERN.test(tex) || !TEX_PATTERN.test(source)) {
         return new Response('bad tex', { status: 400 })
+      }
+      if (source.startsWith('workshop:')) {
+        const found = workshopTexture(source.slice('workshop:'.length), tex, readWorkshopState())
+        if (!found) return new Response('icon unavailable', { status: 404 })
+        return new Response(found.bytes, {
+          headers: { 'content-type': found.type, 'cache-control': 'max-age=3600' },
+        })
       }
       try {
         const png = await renderIcon(tex, source)
