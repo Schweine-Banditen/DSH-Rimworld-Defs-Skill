@@ -443,8 +443,11 @@ export function apply(ctx, config = {}) {
   }
 
   function basicSettings() {
+    const local = readLocalConfig()
+    const saved = typeof local.dataPath === 'string' && local.dataPath.trim() ? local.dataPath : null
     return {
       dataPath: { value: dataPath, source: paths.dataPath.source, exists: existsSync(dataPath) },
+      savedDataPath: saved || join(REPO_ROOT, 'data', 'rimworld-defs.json'),
       defaultDataPath: join(REPO_ROOT, 'data', 'rimworld-defs.json'),
       dataDir,
       localConfig: localConfigPath,
@@ -683,10 +686,9 @@ export function apply(ctx, config = {}) {
       const dir = (url.searchParams.get('dir') || '').trim()
       if (!dir) return json({ error: '请填写数据目录' }, 400)
       const resolvedDir = resolvePath(dir)
-      try {
-        mkdirSync(resolvedDir, { recursive: true })
-      } catch (error) {
-        return json({ error: `无法创建目录：${error.message}` }, 400)
+      // 只接受已存在的目录：不存在就保持原样并报错，不替用户创建。
+      if (!existsSync(resolvedDir) || !statSync(resolvedDir).isDirectory()) {
+        return json({ error: `目录不存在：${resolvedDir}` }, 404)
       }
       const localConfig = readLocalConfig()
       localConfig.dataPath = join(resolvedDir, 'rimworld-defs.json')

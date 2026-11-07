@@ -429,6 +429,9 @@ window.__ModuleLoader__.load({
       modalDesc: { fontSize: 12.5, lineHeight: 1.7, whiteSpace: 'pre-wrap', color: 'var(--dsw-alias-label-primary)' },
       modalActions: { display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '12px 18px', borderTop: '1px solid var(--dsw-alias-border-l1)' },
       mineRow: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)' },
+      filterBar: { display: 'flex', gap: 6, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' },
+      filterChip: { fontSize: 12, padding: '3px 10px', borderRadius: 999, border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer' },
+      filterChipActive: { fontSize: 12, padding: '3px 10px', borderRadius: 999, border: '1px solid var(--dsw-alias-brand-primary)', background: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent)', color: 'var(--dsw-alias-brand-primary)', cursor: 'pointer', fontWeight: 600 },
       basicCard: { display: 'flex', flexDirection: 'column', gap: 6, padding: '12px 14px', marginTop: 12, borderRadius: 10, border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)' },
       basicLabel: { fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' },
       basicPath: { fontSize: 12, fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', wordBreak: 'break-all', color: 'var(--dsw-alias-label-secondary)' },
@@ -1159,7 +1162,7 @@ window.__ModuleLoader__.load({
                     h('td', { style: styles.td }, h('code', null, param.name)),
                     h('td', { style: styles.td }, param.type),
                     h('td', { style: styles.td }, param.required ? '是' : '否'),
-                    h('td', { style: styles.td }, param.description),
+                    h('td', { style: styles.td }, param.description, param.options ? `（可选：${param.options}）` : ''),
                   ),
                 ),
               ),
@@ -1245,11 +1248,12 @@ window.__ModuleLoader__.load({
           ? h(
               'div',
               { style: styles.basicCard },
-              h('div', { style: styles.basicLabel }, '当前数据文件'),
-              h('div', { style: styles.basicPath }, file.value),
+              h('div', { style: styles.basicLabel }, '当前保存路径'),
+              h('div', { style: styles.basicPath }, data.savedDataPath || file.value),
               h(
                 'div',
                 { style: styles.workshopMeta },
+                `解析结果：${file.value}`,
                 `来源：${sourceLabels[file.source] || file.source}`,
                 file.exists
                   ? h('span', { style: styles.badgeOk }, '已生成')
@@ -1298,6 +1302,7 @@ window.__ModuleLoader__.load({
       const [error, setError] = useState('')
       const [notice, setNotice] = useState('')
       const [query, setQuery] = useState('')
+      const [filter, setFilter] = useState('all')
       const [detailMod, setDetailMod] = useState(null)
 
       const loadState = useCallback(() => {
@@ -1367,13 +1372,15 @@ window.__ModuleLoader__.load({
 
       const mods = (data && data.mods) || []
       const needle = query.trim().toLowerCase()
-      const filtered = needle
-        ? mods.filter((mod) =>
-            [mod.name, mod.author, mod.packageId, mod.description].some((value) =>
-              String(value || '').toLowerCase().includes(needle),
-            ),
-          )
-        : mods
+      const filtered = mods.filter((mod) => {
+        if (filter === 'unpulled' && mod.pulled) return false
+        if (filter === 'pulled' && !mod.pulled) return false
+        if (filter === 'updatable' && !(mod.pulled && mod.updateAvailable)) return false
+        if (!needle) return true
+        return [mod.name, mod.author, mod.packageId, mod.description].some((value) =>
+          String(value || '').toLowerCase().includes(needle),
+        )
+      })
 
       return h(
         'div',
@@ -1401,6 +1408,26 @@ window.__ModuleLoader__.load({
         data && data.lastDetect
           ? h('div', { style: styles.empty }, `上次检测：${new Date(data.lastDetect).toLocaleString()} · ${mods.length} 个模组`)
           : h('div', { style: styles.empty }, '尚未检测。点右上角「检测工坊」读取已订阅的模组。'),
+        h(
+          'div',
+          { style: styles.filterBar },
+          [
+            { id: 'all', label: '全部' },
+            { id: 'unpulled', label: '未拉取' },
+            { id: 'pulled', label: '已拉取' },
+            { id: 'updatable', label: '可更新' },
+          ].map((item) =>
+            h(
+              'button',
+              {
+                key: item.id,
+                style: filter === item.id ? styles.filterChipActive : styles.filterChip,
+                onClick: () => setFilter(item.id),
+              },
+              item.label,
+            ),
+          ),
+        ),
         h(
           'div',
           { style: styles.workshopGrid },

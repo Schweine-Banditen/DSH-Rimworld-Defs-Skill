@@ -17,24 +17,36 @@ import { runQuery } from './query.js'
  * 四个工具的定义。`params` 会被翻译成 JSON Schema，也会原样展示在设置页，
  * 所以这里是唯一事实来源。
  */
+const SCOPE_PARAM = {
+  key: 'scope',
+  type: 'string',
+  enum: ['g', 'c', 'm'],
+  description: '来源过滤：g=仅本体与 DLC，c=仅创意工坊，m=仅我的模组；留空=全部',
+}
+
+const SCOPE_DOC = '可用 scope 限定来源：g=本体与 DLC，c=创意工坊，m=我的模组；省略则查询全部。'
+
 const DEFINITIONS = [
   {
     name: 'rimworld_search_def',
     title: '精确查 Def',
     summary: '按 defName（或抽象模板的 Name）查一条定义',
     description:
-      '按 defName 精确查找 RimWorld 的 Def（也匹配抽象模板的 Name）。默认排除 Abstract 模板；同名跨类型会返回多条，用 defType 限定。返回字段含 source、sourcePath、parentChain、graphic、fields。',
-    usage: 'rimworld_search_def({ defName: "Steel", defType: "ThingDef" })',
+      '按 defName 精确查找 RimWorld 的 Def（也匹配抽象模板的 Name）。默认排除 Abstract 模板；同名跨类型会返回多条，用 defType 限定。返回字段含 source、sourcePath、parentChain、graphic、fields。' +
+      SCOPE_DOC,
+    usage: 'rimworld_search_def({ defName: "Steel", defType: "ThingDef", scope: "g" })',
     params: [
       { key: 'defName', type: 'string', required: true, description: '目标 defName，或抽象模板的 Name' },
       { key: 'defType', type: 'string', description: '限定类型，例如 ThingDef、PawnKindDef' },
       { key: 'includeAbstract', type: 'boolean', description: '包含 Abstract 模板（默认 false）' },
+      SCOPE_PARAM,
     ],
     toArgs: (a) => [
       'search-def',
       a.defName,
       ...(a.defType ? ['--def-type', a.defType] : []),
       ...(a.includeAbstract ? ['--include-abstract'] : []),
+      ...(a.scope ? ['--scope', a.scope] : []),
     ],
   },
   {
@@ -42,39 +54,56 @@ const DEFINITIONS = [
     title: '按名称搜索',
     summary: '用中英文关键词模糊搜索 label / title / defName',
     description:
-      '在 label、labelZh、title、titleZh、defName、Name 上做大小写不敏感的包含匹配，按字段权重与匹配质量排序。结果里的 matchedField 表示命中的字段。',
-    usage: 'rimworld_search_by_label({ query: "钢", limit: 10 })',
+      '在 label、labelZh、title、titleZh、defName、Name 上做大小写不敏感的包含匹配，按字段权重与匹配质量排序。结果里的 matchedField 表示命中的字段。' +
+      SCOPE_DOC,
+    usage: 'rimworld_search_by_label({ query: "钢", limit: 10, scope: "g" })',
     params: [
       { key: 'query', type: 'string', required: true, description: '关键词，支持中文' },
       { key: 'limit', type: 'number', description: '返回条数上限（默认 20）' },
+      SCOPE_PARAM,
     ],
-    toArgs: (a) => ['search-label', a.query, ...(a.limit ? ['--limit', String(a.limit)] : [])],
+    toArgs: (a) => [
+      'search-label',
+      a.query,
+      ...(a.limit ? ['--limit', String(a.limit)] : []),
+      ...(a.scope ? ['--scope', a.scope] : []),
+    ],
   },
   {
     name: 'rimworld_list_by_source',
     title: '按来源列出',
-    summary: '列出某个来源（Core / Royalty / …）的 Def',
+    summary: '列出某个来源（Core / Royalty / 模组名）的 Def',
     description:
-      '按 source 过滤（严格按文件路径判定，与 MayRequire 无关）。默认排除 Abstract 模板。返回精简字段：defType、defName、label、labelZh、sourcePath。',
-    usage: 'rimworld_list_by_source({ source: "Royalty", limit: 20 })',
+      '按 source 过滤（严格按文件路径判定，与 MayRequire 无关）。默认排除 Abstract 模板。返回精简字段：defType、defName、label、labelZh、sourcePath。工坊与我的模组的 source 显示为模组/文件夹名。' +
+      SCOPE_DOC,
+    usage: 'rimworld_list_by_source({ source: "Royalty", limit: 20, scope: "g" })',
     params: [
-      { key: 'source', type: 'string', required: true, description: '来源名，例如 Core、Royalty、Odyssey' },
+      { key: 'source', type: 'string', required: true, description: '来源名，例如 Core、Royalty、Odyssey，或工坊模组名' },
       { key: 'limit', type: 'number', description: '返回条数上限' },
+      SCOPE_PARAM,
     ],
-    toArgs: (a) => ['list-source', a.source, ...(a.limit ? ['--limit', String(a.limit)] : [])],
+    toArgs: (a) => [
+      'list-source',
+      a.source,
+      ...(a.limit ? ['--limit', String(a.limit)] : []),
+      ...(a.scope ? ['--scope', a.scope] : []),
+    ],
   },
   {
     name: 'rimworld_list_by_category',
     title: '按分类过滤',
     summary: '按 category / thingCategories 组合过滤',
     description:
-      'category 与 thingCategories 都是可选条件（AND），且都沿父链取有效值，结果带 categoryDepth / categoryFrom 说明继承来源。至少提供其中一个。常用于写 recipe 的 thingCategories 或筛建筑。',
-    usage: 'rimworld_list_by_category({ category: "Item", thingCategories: ["ResourcesRaw"], defType: "ThingDef", limit: 50 })',
+      'category 与 thingCategories 都是可选条件（AND），且都沿父链取有效值，结果带 categoryDepth / categoryFrom 说明继承来源。至少提供其中一个。常用于写 recipe 的 thingCategories 或筛建筑。' +
+      SCOPE_DOC,
+    usage:
+      'rimworld_list_by_category({ category: "Item", thingCategories: ["ResourcesRaw"], defType: "ThingDef", limit: 50, scope: "g" })',
     params: [
       { key: 'category', type: 'string', description: '顶层大类，例如 Item、Building' },
       { key: 'thingCategories', type: 'array', items: 'string', description: '细分类列表，例如 ["ResourcesRaw"]' },
       { key: 'defType', type: 'string', description: '限定类型，例如 ThingDef' },
       { key: 'limit', type: 'number', description: '返回条数上限（默认 200）' },
+      SCOPE_PARAM,
     ],
     validate: (a) => {
       if (!a.category && !(a.thingCategories && a.thingCategories.length > 0)) {
@@ -89,6 +118,7 @@ const DEFINITIONS = [
         : []),
       ...(a.defType ? ['--def-type', a.defType] : []),
       ...(a.limit ? ['--limit', String(a.limit)] : []),
+      ...(a.scope ? ['--scope', a.scope] : []),
     ],
   },
 ]
@@ -105,6 +135,7 @@ export const TOOL_CATALOG = DEFINITIONS.map((definition) => ({
     type: param.type,
     required: param.required === true,
     description: param.description,
+    ...(param.enum ? { options: param.enum.join(' / ') } : {}),
   })),
 }))
 
@@ -113,6 +144,7 @@ function parametersSchema(definition) {
   for (const param of definition.params) {
     const property = { type: param.type, description: param.description }
     if (param.items) property.items = { type: param.items }
+    if (param.enum) property.enum = param.enum
     properties[param.key] = property
   }
   return {
@@ -133,6 +165,9 @@ function normalizeArgs(definition, args) {
     }
     if (param.type === 'number' && !Number.isFinite(Number(value))) {
       throw new Error(`${param.key} 需要数字`)
+    }
+    if (param.enum && !param.enum.includes(String(value))) {
+      throw new Error(`${param.key} 只能是 ${param.enum.join(' / ')}`)
     }
     normalized[param.key] = value
   }
