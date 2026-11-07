@@ -37,7 +37,7 @@ whenToUse: 用户要求安装、配置、迁移或初始化本技能时；或写
 | --- | --- |
 | 游戏根目录 | `--game` / `RIMWORLD_GAME` → `rimworld-defs.local.json` 的 `gameRoot` → 数据文件里记录的 `gameRoot` → Steam 自动发现（注册表 → `libraryfolders.vdf` → 各库）→ 常见目录兜底 |
 | 数据文件 | `--json` / `RIMWORLD_DATA` → 本机配置 `dataPath` → `data/rimworld-defs.json` |
-| Python 解释器 | `RIMWORLD_PYTHON` → 本机配置 `pythonExe` → PATH 上的 `python` |
+| Python 解释器 | `RIMWORLD_PYTHON` → 本机配置 `pythonExe` → PATH 上的 `python` → 自动回退 `py -3`（Windows）/ `python3` |
 
 - 仓库内**不含任何绝对路径**；本机差异只放在 `rimworld-defs.local.json`（gitignore）或环境变量里。
 - 自检：`python scripts/paths.py --json` 打印每个路径的来源（`env` / `local-config` / `steam` / `derived`）与是否存在；迁移后先用它定位问题。
@@ -45,14 +45,14 @@ whenToUse: 用户要求安装、配置、迁移或初始化本技能时；或写
 
 ## 初始化（自动配置 / 首次安装）
 
-用户要求「配置 / 安装这个 Skill」时，按顺序执行并逐步验证：
+用户要求「配置 / 安装这个 Skill」时，按顺序执行并逐步验证。**首选一键初始化**：跑 `python scripts/init.py`（或会话里直接调用 `rimworld_init` 工具），它会自检路径与依赖，并在数据缺失或 `--force` 时重新生成；完成后再做第 3–6 步。
 
-1. **环境**：Python ≥ 3.13（读 `Assets.zip` 的 ZSTD 需要）；`pip install lxml pillow`；需要 DLC 贴图时再 `pip install UnityPy`。
-2. **生成数据**：仓库根执行 `python scripts/extract_defs.py`（游戏目录自动发现；找不到时设 `RIMWORLD_GAME` 或写 `rimworld-defs.local.json`）。
+1. **环境**：Python ≥ 3.11；`pip install lxml pillow`；需要 DLC 贴图时再 `pip install UnityPy`。
+2. **生成数据**：`python scripts/init.py`（等价于 `python scripts/extract_defs.py`；游戏目录自动发现，找不到时设 `RIMWORLD_GAME` 或写 `rimworld-defs.local.json`）。
 3. **自检**：`python scripts/paths.py --json`，确认 `gameRoot.valid` 与 `data.exists` 均为 `true`。
 4. **接入面板**：用 DSH 的 `plugin_manager install_bundle` 指向 `<repo>/ui`，然后刷新页面；`/rimworld-defs/api/meta` 返回 200 即成功（该步会改动 profile 全局状态，先征得用户同意）。
-5. **让 DSH 发现本 Skill**：在会话工作目录建目录联接 `<workspace>/.dsh/skills/rimworld-defs-viewer` → 仓库根（同盘、免管理员）；下一轮对话就能在技能目录里看到它。
-6. **验证**：`python scripts/query_defs.py search-def Steel` 有结果；面板能显示 def；`rimworld_search_def` 工具可调用。
+5. **让 DSH 发现本 Skill**：在会话工作目录建目录联接 `<workspace>/.dsh/skills/<仓库名>` → 仓库根（同盘、免管理员）；也可以调用 `rimworld_init({ workspace: "<会话目录>", link: true })` 自动创建。下一轮对话就能在技能目录里看到它。
+6. **验证**：`rimworld_init` 返回 `ok: true`；`python scripts/query_defs.py search-def Steel` 有结果；面板能显示 def；`rimworld_search_def` 工具可调用。
 
 路径优先级、跨盘限制与排障见仓库 `docs/manual.md` §4。
 
@@ -60,14 +60,17 @@ whenToUse: 用户要求安装、配置、迁移或初始化本技能时；或写
 
 ### 优先：智能体工具（已由面板注册）
 
-面板插件启动时注册了下面四个工具，会话里直接调用即可；它们内部调用 `scripts/query_defs.py`，语义与命令行完全一致。
+面板插件启动时注册了下面五个工具，会话里直接调用即可；它们内部调用 `scripts/query_defs.py`，语义与命令行完全一致。
 
 | 工具 | 参数 | 用途 |
 | --- | --- | --- |
-| `rimworld_search_def` | `defName`、可选 `defType`、`includeAbstract` | 精确查 defName（或模板 Name） |
-| `rimworld_search_by_label` | `query`、`limit` | 中英文关键词模糊搜索 |
-| `rimworld_list_by_source` | `source`、`limit` | 按 DLC/来源列出 |
-| `rimworld_list_by_category` | `category`、`thingCategories`、`defType`、`limit` | 按分类组合过滤 |
+| `rimworld_search_def` | `defName`、可选 `defType`、`includeAbstract`、`scope` | 精确查 defName（或模板 Name） |
+| `rimworld_search_by_label` | `query`、`limit`、`scope` | 中英文关键词模糊搜索 |
+| `rimworld_list_by_source` | `source`、`limit`、`scope` | 按 DLC/来源列出 |
+| `rimworld_list_by_category` | `category`、`thingCategories`、`defType`、`limit`、`scope` | 按分类组合过滤 |
+| `rimworld_init` | 可选 `force`、`workspace`、`link` | 初始化/自检：路径、依赖、生成数据、Skill 联接 |
+
+`scope` 用于过滤来源：`g`=仅本体与 DLC，`c`=仅创意工坊，`m`=仅我的模组；留空表示全部。
 
 ### 回退：命令行
 

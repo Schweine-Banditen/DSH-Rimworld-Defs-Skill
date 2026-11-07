@@ -170,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
     ok = bool(game["valid"]) and data_summary.get("readable") and lxml_version is not None
     payload = {
         "ok": ok,
-        "python": {"executable": sys.executable, "version": sys.version.split()[0], "required": ">=3.10"},
+        "python": {"executable": sys.executable, "version": sys.version.split()[0], "required": ">=3.11"},
         "deps": {"lxml": lxml_version, "pillow": pillow_version, "unitypy": unitypy_version},
         "paths": {
             "repoRoot": str(REPO_ROOT),

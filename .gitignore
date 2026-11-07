@@ -79,3 +79,7 @@ __pycache__/
 # 参照 rimworld-defs.local.example.json 创建；解析优先级见 scripts/paths.py
 rimworld-defs.local.json
 
+# ---------- 工作区联接（session 级，不入库） ----------
+# rimworld_init / 手动建立的 .dsh/skills 目录联接，不应被提交
+.dsh/
+
