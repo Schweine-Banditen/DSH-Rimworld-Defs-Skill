@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Client half of the RimWorld Defs panel.
  *
  * Left: file-manager tree (source → category → defs). Right: tree view of the
@@ -22,12 +22,15 @@ window.__ModuleLoader__.load({
       { id: 'uranium', label: '铀矿（淡灰）', color: '#b9bcc4' },
     ]
 
-    // ---- 翻译集：可保存、可切换的多份翻译表 ----
-    // 旧版只存一份（STORAGE_KEY）；首次启动时自动迁移成名为「我的翻译」的翻译集。
-    const PROFILE_KEY = 'rimworld-defs.translation-profiles'
+    // ---- 翻译集：命名快照 + 单一临时集 ----
+    // 临时集永远只有一份，逐字保存当前表格；命名集是用户手动保存的快照。
+    const SETS_KEY = 'rimworld-defs.translation-sets'
+    const WORKING_KEY = 'rimworld-defs.translation-working'
+    const LEGACY_PROFILE_KEY = 'rimworld-defs.translation-profiles'
     const PRESET_CACHE_KEY = 'rimworld-defs.preset.zh-CN'
     const DEFAULT_SET = 'default'
     const BUILTIN_PRESET = 'zh-CN'
+    const WORKING_SET = 'working'
 
     let BUILTIN = null
     try {
@@ -36,8 +39,9 @@ window.__ModuleLoader__.load({
       BUILTIN = null
     }
 
-    let PROFILES = { active: DEFAULT_SET, sets: {} }
     let TRANSLATIONS = {}
+    let SETS = {}
+    let WORKING = { source: null }
 
     function readStorage(key, fallback) {
       try {
@@ -61,60 +65,68 @@ window.__ModuleLoader__.load({
       Object.assign(TRANSLATIONS, entries || {})
     }
 
-    /** 某个翻译集的条目：default 恒为空，内置集只读，其余取用户集合。 */
-    function entriesForSet(id) {
-      if (id === DEFAULT_SET) return {}
-      if (id === BUILTIN_PRESET) return (BUILTIN && BUILTIN.entries) || {}
-      return PROFILES.sets[id] || {}
+    function persistSets() {
+      writeStorage(SETS_KEY, SETS)
     }
 
-    function persistProfiles() {
-      writeStorage(PROFILE_KEY, PROFILES)
+    /** 临时集逐字落盘——这就是「用户最后修改」的唯一副本。 */
+    function persistWorking() {
+      writeStorage(WORKING_KEY, { entries: { ...TRANSLATIONS }, source: WORKING.source })
     }
 
-    /** 只写用户集合；default 与内置集不落盘。 */
-    function persistActiveSet() {
-      if (PROFILES.active === DEFAULT_SET || PROFILES.active === BUILTIN_PRESET) return
-      PROFILES.sets[PROFILES.active] = { ...TRANSLATIONS }
-      persistProfiles()
-    }
-
-    function activateSet(id) {
-      PROFILES.active = id
-      replaceTranslations(entriesForSet(id))
-      persistProfiles()
+    function setLabel(id) {
+      if (id === DEFAULT_SET) return '默认（空）'
+      if (id === BUILTIN_PRESET) return (BUILTIN && BUILTIN.label) || '简体中文（内置）'
+      if (id === WORKING_SET) return '临时修改'
       return id
     }
 
-    /** 新建集合（entries 省略时复制当前翻译），切换过去；重名自动加序号。 */
-    function createSet(name, entries) {
-      let candidate = String(name || '').trim() || '我的翻译'
-      if (PROFILES.sets[candidate]) {
-        let index = 2
-        while (PROFILES.sets[`${candidate} ${index}`]) index += 1
-        candidate = `${candidate} ${index}`
-      }
-      const content = { ...(entries || TRANSLATIONS) }
-      PROFILES.sets[candidate] = content
-      PROFILES.active = candidate
-      persistProfiles()
-      replaceTranslations(content)
-      return candidate
-    }
-
-    (function bootTranslationProfiles() {
-      const saved = readStorage(PROFILE_KEY, null)
-      if (saved && typeof saved === 'object' && saved.sets && typeof saved.sets === 'object') {
-        PROFILES = { active: saved.active || DEFAULT_SET, sets: saved.sets }
+    (function bootTranslations() {
+      // 1) 命名集：优先新键；否则从上一版（{active, sets}）迁移
+      let migratedEntries = null
+      let migratedSource = null
+      const saved = readStorage(SETS_KEY, null)
+      if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+        for (const [name, value] of Object.entries(saved)) {
+          if (!value || typeof value !== 'object') continue
+          if (value.entries && typeof value.entries === 'object') {
+            SETS[name] = {
+              description: typeof value.description === 'string' ? value.description : '',
+              entries: value.entries,
+            }
+          } else {
+            SETS[name] = { description: '', entries: value }
+          }
+        }
       } else {
-        const legacy = readStorage(STORAGE_KEY, {})
-        const hasLegacy = legacy && typeof legacy === 'object' && Object.keys(legacy).length > 0
-        PROFILES = hasLegacy
-          ? { active: '我的翻译', sets: { 我的翻译: legacy } }
-          : { active: DEFAULT_SET, sets: {} }
-        persistProfiles()
+        const legacy = readStorage(LEGACY_PROFILE_KEY, null)
+        if (legacy && legacy.sets && typeof legacy.sets === 'object') {
+          for (const [name, value] of Object.entries(legacy.sets)) {
+            if (value && typeof value === 'object') SETS[name] = { description: '', entries: value }
+          }
+          if (Object.keys(SETS).length > 0) persistSets()
+          // 上一版把"当前编辑内容"存在 active 集合里，这里顺手接成临时集
+          if (legacy.active && SETS[legacy.active]) {
+            migratedEntries = SETS[legacy.active].entries
+            migratedSource = legacy.active
+          }
+        }
       }
-      replaceTranslations(entriesForSet(PROFILES.active))
+
+      // 2) 临时集：优先自己的键；否则用上一版的工作表 / 更早的单表
+      const working = readStorage(WORKING_KEY, null)
+      const legacyTable = readStorage(STORAGE_KEY, null)
+      if (working && working.entries && typeof working.entries === 'object') {
+        replaceTranslations(working.entries)
+        WORKING.source = typeof working.source === 'string' ? working.source : null
+      } else if (migratedEntries) {
+        replaceTranslations(migratedEntries)
+        WORKING.source = migratedSource
+      } else if (legacyTable && typeof legacyTable === 'object' && Object.keys(legacyTable).length > 0) {
+        replaceTranslations(legacyTable)
+        WORKING.source = null
+      }
+      persistWorking()
     })()
 
     function zhOf(key) {
@@ -134,10 +146,14 @@ window.__ModuleLoader__.load({
       @keyframes rwRowIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
       @keyframes rwExpand { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
       @keyframes rwFlash { 0% { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 35%, transparent); } 100% { background: transparent; } }
+      @keyframes rwFade { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes rwDialogIn { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+      @keyframes rwSetIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
       .rw-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
       .rw-scroll::-webkit-scrollbar-thumb { background: var(--dsw-alias-border-l2); border-radius: 4px; }
       .rw-row:hover { background: var(--dsw-alias-bg-layer-2); }
       .rw-attr:hover { background: var(--dsw-alias-bg-layer-2); }
+      .rw-set-row:hover { background: var(--dsw-alias-bg-layer-2); }
     `
 
     const styles = {
@@ -344,9 +360,25 @@ window.__ModuleLoader__.load({
       tabActive: { background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-brand-primary)' },
       settingsBody: { flex: 1, overflow: 'auto', padding: '16px 22px' },
       setBar: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' },
-      setLabel: { fontSize: 12, color: 'var(--dsw-alias-label-secondary)' },
-      select: { fontSize: 12, padding: '4px 6px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)' },
-      button: { fontSize: 12, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer' },
+      chevronButton: { fontSize: 11, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer' },
+      primaryButton: { fontSize: 12, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--dsw-alias-brand-primary)', background: 'var(--dsw-alias-brand-primary)', color: '#fff', cursor: 'pointer' },
+      iconButton: { width: 30, height: 30, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer', fontSize: 15, lineHeight: 1 },
+      descEditor: { marginBottom: 10 },
+      textarea: { width: '100%', boxSizing: 'border-box', resize: 'vertical', minHeight: 54, fontSize: 12.5, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', fontFamily: 'inherit' },
+      saveError: { color: 'var(--dsw-alias-state-warn-primary)', fontSize: 12, marginBottom: 8 },
+      notice: { color: 'var(--dsw-alias-label-secondary)', fontSize: 12, marginBottom: 8 },
+      backdrop: { position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0,0,0,.3)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'rwFade .16s ease-out' },
+      dialog: { width: 520, maxWidth: '92vw', maxHeight: '72vh', display: 'flex', flexDirection: 'column', background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 12, boxShadow: '0 18px 50px rgba(0,0,0,.3)', animation: 'rwDialogIn .2s cubic-bezier(.2,.7,.3,1)' },
+      dialogHead: { display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderBottom: '1px solid var(--dsw-alias-border-l1)' },
+      dialogList: { overflow: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 4 },
+      setRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, cursor: 'pointer', border: '1px solid transparent', animation: 'rwSetIn .18s ease-out both' },
+      setRowMain: { flex: 1, minWidth: 0 },
+      setRowName: { fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 },
+      setRowDesc: { fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+      setRowMeta: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', marginTop: 2 },
+      currentBadge: { fontSize: 10.5, padding: '0 6px', borderRadius: 999, border: '1px solid var(--dsw-alias-brand-primary)', color: 'var(--dsw-alias-brand-primary)' },
+      setDelete: { fontSize: 11.5, padding: '3px 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer' },
+      setLocked: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' },
       table: { width: '100%', borderCollapse: 'collapse', fontSize: 12.5 },
       th: { textAlign: 'left', color: 'var(--dsw-alias-label-secondary)', fontWeight: 600, padding: '6px 8px', borderBottom: '1px solid var(--dsw-alias-border-l2)' },
       td: { padding: '4px 8px', borderBottom: '1px solid var(--dsw-alias-border-l1)', verticalAlign: 'middle' },
@@ -1000,11 +1032,12 @@ window.__ModuleLoader__.load({
       const [revision, setRevision] = useState(0)
       const [error, setError] = useState(null)
       const [toolInfo, setToolInfo] = useState(null)
-      const [activeSet, setActiveSet] = useState(PROFILES.active)
-      const [setNames, setSetNames] = useState(() => Object.keys(PROFILES.sets))
+      const [setNames, setSetNames] = useState(() => Object.keys(SETS))
+      const [dialogOpen, setDialogOpen] = useState(false)
       const [newSetName, setNewSetName] = useState('')
-      const [selectedSet, setSelectedSet] = useState(PROFILES.active)
-      const [applying, setApplying] = useState(false)
+      const [newSetDesc, setNewSetDesc] = useState('')
+      const [descOpen, setDescOpen] = useState(false)
+      const [saveError, setSaveError] = useState('')
       const [notice, setNotice] = useState('')
 
       useEffect(() => {
@@ -1021,13 +1054,19 @@ window.__ModuleLoader__.load({
           .then((preset) => {
             BUILTIN = preset
             writeStorage(PRESET_CACHE_KEY, preset)
-            if (PROFILES.active === BUILTIN_PRESET) {
-              replaceTranslations(entriesForSet(BUILTIN_PRESET))
-              setRevision((value) => value + 1)
-            }
+            setRevision((value) => value + 1)
           })
-          .catch(() => setNotice('内置翻译集不可用（面板未提供预设文件）'))
+          .catch(() => setNotice('内置翻译集未加载：/presets 接口需要重启 DSH 后可用'))
       }, [])
+
+      useEffect(() => {
+        if (!dialogOpen) return undefined
+        const onKeyDown = (event) => {
+          if (event.key === 'Escape') setDialogOpen(false)
+        }
+        window.addEventListener('keydown', onKeyDown)
+        return () => window.removeEventListener('keydown', onKeyDown)
+      }, [dialogOpen])
 
       const filtered = keys.filter((key) => {
         const needle = query.trim().toLowerCase()
@@ -1035,20 +1074,6 @@ window.__ModuleLoader__.load({
         return key.toLowerCase().includes(needle) || zhOf(key).toLowerCase().includes(needle)
       })
 
-      // 下拉只负责"选来源"：必须按「应用覆盖」才会写进当前表格。
-      const readOnlySet = activeSet === DEFAULT_SET || activeSet === BUILTIN_PRESET
-
-      // 内置集与默认集只读：在它们上面直接编辑时，先把当前内容另存成用户集。
-      const ensureEditable = () => {
-        if (PROFILES.active !== DEFAULT_SET && PROFILES.active !== BUILTIN_PRESET) return
-        const name = createSet(newSetName || '我的翻译')
-        setActiveSet(name)
-        setSetNames(Object.keys(PROFILES.sets))
-        setNewSetName('')
-        setNotice(`已另存为「${name}」`)
-      }
-
-      /** 内置预设按需拉取：面板启动时拉失败（例如没重启）也还能点按钮重试。 */
       const ensurePreset = async () => {
         if (BUILTIN && BUILTIN.entries) return BUILTIN
         const response = await fetch(`${API}/presets`)
@@ -1059,88 +1084,102 @@ window.__ModuleLoader__.load({
         return preset
       }
 
-      const entriesOf = async (id) => {
-        if (id === DEFAULT_SET) return {}
-        if (id === BUILTIN_PRESET) {
-          const preset = await ensurePreset()
-          return preset.entries || {}
+      const loadSet = async (id) => {
+        setDialogOpen(false)
+        if (id === WORKING_SET) {
+          setNotice('临时修改保持不变')
+          return
         }
-        return PROFILES.sets[id] || {}
-      }
-
-      const applySelected = async () => {
-        setApplying(true)
         try {
-          const entries = await entriesOf(selectedSet)
-          const count = Object.keys(entries).length
-          if (count === 0 && selectedSet !== DEFAULT_SET) {
-            setNotice('所选翻译集为空，未做改动')
-            return
-          }
-          if (readOnlySet) {
-            if (count === 0) {
-              // 用「默认」把表格清空，保持只读状态，不产生空集合。
-              activateSet(DEFAULT_SET)
-              setActiveSet(DEFAULT_SET)
-              setNotice('当前表格已清空（默认集）')
-            } else {
-              // 当前是只读集：新建一个用户集来承载，避免污染内置/默认。
-              const name = createSet(newSetName || '我的翻译', entries)
-              setActiveSet(name)
-              setSetNames(Object.keys(PROFILES.sets))
-              setNewSetName('')
-              setNotice(`已载入 ${count} 条，另存为「${name}」`)
-            }
-          } else {
-            // 当前是用户集：用所选内容整份覆盖它。
-            const target = PROFILES.active
-            PROFILES.sets[target] = { ...entries }
-            persistProfiles()
-            replaceTranslations(entries)
-            setNotice(count === 0 ? `已清空「${target}」` : `已用所选翻译覆盖「${target}」（${count} 条）`)
-          }
+          let entries = {}
+          if (id === BUILTIN_PRESET) entries = (await ensurePreset()).entries || {}
+          else if (id !== DEFAULT_SET) entries = (SETS[id] && SETS[id].entries) || {}
+          replaceTranslations(entries)
+          WORKING.source = id === DEFAULT_SET ? null : id
+          persistWorking()
           setRevision((value) => value + 1)
-        } catch (error) {
-          setNotice(`载入失败：${error.message}｜新增的 /presets 接口需要重启 DSH 才生效`)
-        } finally {
-          setApplying(false)
+          setNotice(`已载入「${setLabel(id)}」· ${Object.keys(entries).length} 个字段`)
+        } catch (err) {
+          setNotice(`载入失败：${err.message}（新增接口需要重启 DSH 才生效）`)
         }
       }
 
       const setValue = (key, value) => {
-        ensureEditable()
         if (value.trim()) TRANSLATIONS[key] = value
         else delete TRANSLATIONS[key]
-        persistActiveSet()
+        persistWorking()
         setRevision((value) => value + 1)
-      }
-
-      const saveNow = () => {
-        persistActiveSet()
-        setNotice(`已保存「${PROFILES.active}」`)
       }
 
       const saveAs = () => {
-        const name = createSet(newSetName)
-        setActiveSet(name)
-        setSetNames(Object.keys(PROFILES.sets))
+        const name = newSetName.trim()
+        if (!name) {
+          setSaveError('请先填写翻译集名称')
+          return
+        }
+        if (name === DEFAULT_SET || name === BUILTIN_PRESET || name === WORKING_SET) {
+          setSaveError('该名称是保留名，请换一个')
+          return
+        }
+        if (SETS[name]) {
+          setSaveError('已存在同名翻译集，请换一个名称')
+          return
+        }
+        SETS[name] = { description: newSetDesc.trim(), entries: { ...TRANSLATIONS } }
+        persistSets()
+        WORKING.source = name
+        persistWorking()
+        setSetNames(Object.keys(SETS))
         setNewSetName('')
-        setNotice(`已另存为「${name}」`)
-      }
-
-      const removeSet = () => {
-        if (PROFILES.active === DEFAULT_SET || PROFILES.active === BUILTIN_PRESET) return
-        const removed = PROFILES.active
-        delete PROFILES.sets[removed]
-        activateSet(DEFAULT_SET)
-        setActiveSet(DEFAULT_SET)
-        setSelectedSet(DEFAULT_SET)
-        setSetNames(Object.keys(PROFILES.sets))
+        setNewSetDesc('')
+        setDescOpen(false)
+        setSaveError('')
         setRevision((value) => value + 1)
-        setNotice(`已删除「${removed}」`)
+        setNotice(`已保存「${name}」· ${Object.keys(TRANSLATIONS).length} 个字段`)
       }
 
-      const builtinLabel = (BUILTIN && BUILTIN.label) || '简体中文（内置）'
+      const deleteSet = (name) => {
+        if (!SETS[name]) return
+        delete SETS[name]
+        persistSets()
+        if (WORKING.source === name) {
+          WORKING.source = null
+          persistWorking()
+        }
+        setSetNames(Object.keys(SETS))
+        setRevision((value) => value + 1)
+        setNotice(`已删除「${name}」`)
+      }
+
+      const translatedCount = Object.keys(TRANSLATIONS).length
+      const builtinCount = BUILTIN && BUILTIN.entries ? Object.keys(BUILTIN.entries).length : 0
+      const currentLabel = WORKING.source ? setLabel(WORKING.source) : '未命名'
+
+      const setItems = [
+        {
+          id: WORKING_SET,
+          name: '临时修改',
+          description: WORKING.source ? `来自「${setLabel(WORKING.source)}」，自动保存最后改动` : '自动保存最后改动，始终只保留一份',
+          count: translatedCount,
+          deletable: false,
+          current: true,
+        },
+        { id: DEFAULT_SET, name: '默认（空）', description: '清空当前表格，从零开始', count: 0, deletable: false },
+        {
+          id: BUILTIN_PRESET,
+          name: (BUILTIN && BUILTIN.label) || '简体中文（内置）',
+          description: (BUILTIN && BUILTIN.description) || '内置中文翻译（未加载，需重启 DSH）',
+          count: builtinCount,
+          deletable: false,
+        },
+        ...setNames.map((name) => ({
+          id: name,
+          name,
+          description: (SETS[name] && SETS[name].description) || '（无描述）',
+          count: Object.keys((SETS[name] && SETS[name].entries) || {}).length,
+          deletable: true,
+        })),
+      ]
 
       return h(
         'div',
@@ -1169,87 +1208,194 @@ window.__ModuleLoader__.load({
           tab === 'tools'
             ? h(ToolSettings, { info: toolInfo })
             : h(
-            'div',
-            null,
-            h(
-              'div',
-              { style: styles.setBar },
-              h('span', { style: styles.setLabel }, '翻译集'),
-              h(
-                'select',
-                { style: styles.select, value: selectedSet, onChange: (event) => setSelectedSet(event.target.value) },
-                h('option', { value: DEFAULT_SET }, '默认（全部为空）'),
+                'div',
+                null,
                 h(
-                  'option',
-                  { value: BUILTIN_PRESET },
-                  BUILTIN && BUILTIN.entries
-                    ? `${builtinLabel} · ${Object.keys(BUILTIN.entries).length} 条`
-                    : `${builtinLabel}（未加载，需重启 DSH）`,
+                  'div',
+                  { style: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' } },
+                  h('div', { style: { fontSize: 15, fontWeight: 600 } }, '翻译'),
+                  h('span', { style: styles.empty }, '为字段名补充中文；填写后会在属性显示时追加。'),
+                  h('input', {
+                    style: { ...styles.input, width: 240, marginLeft: 'auto' },
+                    placeholder: '搜索字段或中文',
+                    value: query,
+                    onChange: (event) => setQuery(event.target.value),
+                    'aria-label': '搜索字段',
+                  }),
                 ),
-                setNames.map((name) => h('option', { key: name, value: name }, name)),
-              ),
-              h(
-                'button',
-                { style: styles.button, onClick: applySelected, disabled: applying },
-                applying ? '载入中…' : '应用覆盖',
-              ),
-              h('span', { style: styles.setLabel }, `当前：${activeSet === DEFAULT_SET ? '默认（未保存）' : activeSet}`),
-              h('input', {
-                style: { ...styles.input, width: 160 },
-                placeholder: '另存为名称',
-                value: newSetName,
-                onChange: (event) => setNewSetName(event.target.value),
-                'aria-label': '另存为名称',
-              }),
-              h('button', { style: styles.button, onClick: saveNow, disabled: readOnlySet }, '保存'),
-              h('button', { style: styles.button, onClick: saveAs }, '另存为'),
-              h('button', { style: styles.button, onClick: removeSet, disabled: readOnlySet }, '删除'),
-              h('span', { style: styles.empty }, notice || `已翻译 ${Object.keys(TRANSLATIONS).length} 项`),
-            ),
-            h(
-            'div',
-            { style: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 } },
-            h('div', { style: { fontSize: 15, fontWeight: 600 } }, '翻译'),
-            h('span', { style: styles.empty }, '为字段名补充中文；填写后会在属性显示时追加。'),
-            h('input', {
-              style: { ...styles.input, width: 240, marginLeft: 'auto' },
-              placeholder: '搜索字段或中文',
-              value: query,
-              onChange: (event) => setQuery(event.target.value),
-              'aria-label': '搜索字段',
-            }),
-          ),
-          error ? h('div', { style: styles.empty }, `加载失败：${error}`) : null,
-          h(
-            'table',
-            { style: styles.table },
-            h('thead', null, h('tr', null, h('th', { style: styles.th }, '英文关键字段'), h('th', { style: styles.th }, '中文（自定义）'))),
-            h(
-              'tbody',
-              null,
-              filtered.map((key) =>
                 h(
-                  'tr',
-                  { key },
-                  h('td', { style: styles.td }, key),
+                  'div',
+                  { style: styles.setBar },
+                  h('input', {
+                    style: { ...styles.input, width: 180 },
+                    placeholder: '翻译集名称',
+                    value: newSetName,
+                    onChange: (event) => {
+                      setNewSetName(event.target.value)
+                      setSaveError('')
+                    },
+                    onKeyDown: (event) => {
+                      if (event.key === 'Enter') saveAs()
+                    },
+                    'aria-label': '翻译集名称',
+                  }),
                   h(
-                    'td',
-                    { style: styles.td },
-                    h('input', {
-                      style: styles.input,
-                      value: TRANSLATIONS[key] || '',
-                      placeholder: '留空则不追加',
-                      onChange: (event) => setValue(key, event.target.value),
-                      'aria-label': `翻译 ${key}`,
-                    }),
+                    'button',
+                    {
+                      style: styles.chevronButton,
+                      onClick: () => setDescOpen((value) => !value),
+                      title: '添加描述',
+                      'aria-expanded': descOpen,
+                    },
+                    descOpen ? '▴' : '▾',
+                  ),
+                  h('button', { style: styles.primaryButton, onClick: saveAs }, '保存'),
+                  h(
+                    'button',
+                    {
+                      style: styles.iconButton,
+                      onClick: () => setDialogOpen(true),
+                      title: '翻译集列表',
+                      'aria-label': '翻译集列表',
+                    },
+                    h(
+                      'svg',
+                      {
+                        width: 16,
+                        height: 16,
+                        viewBox: '0 0 24 24',
+                        fill: 'none',
+                        stroke: 'currentColor',
+                        strokeWidth: 2,
+                        strokeLinecap: 'round',
+                        strokeLinejoin: 'round',
+                      },
+                      h('path', { d: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z' }),
+                      h('polyline', { points: '14 2 14 8 20 8' }),
+                    ),
+                  ),
+                  h(
+                    'span',
+                    { style: styles.empty },
+                    `临时集 ${translatedCount} 个字段${WORKING.source ? ` · 来自「${currentLabel}」` : ''}`,
+                  ),
+                ),
+                descOpen
+                  ? h(
+                      'div',
+                      { style: styles.descEditor },
+                      h('textarea', {
+                        style: styles.textarea,
+                        rows: 2,
+                        placeholder: '给这个翻译集写一句描述（可选），会显示在翻译集列表里',
+                        value: newSetDesc,
+                        onChange: (event) => setNewSetDesc(event.target.value),
+                      }),
+                    )
+                  : null,
+                saveError ? h('div', { style: styles.saveError }, saveError) : null,
+                notice ? h('div', { style: styles.notice }, notice) : null,
+                error ? h('div', { style: styles.empty }, `加载失败：${error}`) : null,
+                h(
+                  'table',
+                  { style: styles.table },
+                  h(
+                    'thead',
+                    null,
+                    h('tr', null, h('th', { style: styles.th }, '英文关键字段'), h('th', { style: styles.th }, '中文（自定义）')),
+                  ),
+                  h(
+                    'tbody',
+                    null,
+                    filtered.map((key) =>
+                      h(
+                        'tr',
+                        { key },
+                        h('td', { style: styles.td }, key),
+                        h(
+                          'td',
+                          { style: styles.td },
+                          h('input', {
+                            style: styles.input,
+                            value: TRANSLATIONS[key] || '',
+                            placeholder: '留空则不追加',
+                            onChange: (event) => setValue(key, event.target.value),
+                            'aria-label': `翻译 ${key}`,
+                          }),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                filtered.length === 0 ? h('div', { style: { ...styles.empty, marginTop: 10 } }, '没有匹配的字段。') : null,
+              ),
+        ),
+        dialogOpen
+          ? h(
+              'div',
+              { style: styles.backdrop, onClick: () => setDialogOpen(false) },
+              h(
+                'div',
+                {
+                  style: styles.dialog,
+                  onClick: (event) => event.stopPropagation(),
+                  role: 'dialog',
+                  'aria-label': '翻译集列表',
+                },
+                h(
+                  'div',
+                  { style: styles.dialogHead },
+                  h('div', { style: { fontSize: 14, fontWeight: 600 } }, '翻译集'),
+                  h('span', { style: styles.empty }, '点选即载入临时集；删除只影响命名集'),
+                  h(
+                    'button',
+                    { style: styles.iconButton, onClick: () => setDialogOpen(false), 'aria-label': '关闭' },
+                    '×',
+                  ),
+                ),
+                h(
+                  'div',
+                  { style: styles.dialogList },
+                  setItems.map((item, index) =>
+                    h(
+                      'div',
+                      {
+                        key: item.id,
+                        className: 'rw-set-row',
+                        style: { ...styles.setRow, animationDelay: `${index * 25}ms` },
+                        onClick: () => loadSet(item.id),
+                      },
+                      h(
+                        'div',
+                        { style: styles.setRowMain },
+                        h(
+                          'div',
+                          { style: styles.setRowName },
+                          item.name,
+                          item.current ? h('span', { style: styles.currentBadge }, '当前') : null,
+                        ),
+                        h('div', { style: styles.setRowDesc }, item.description),
+                        h('div', { style: styles.setRowMeta }, `${item.count} 个字段`),
+                      ),
+                      item.deletable
+                        ? h(
+                            'button',
+                            {
+                              style: styles.setDelete,
+                              onClick: (event) => {
+                                event.stopPropagation()
+                                deleteSet(item.id)
+                              },
+                            },
+                            '删除',
+                          )
+                        : h('span', { style: styles.setLocked }, '只读'),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-          filtered.length === 0 ? h('div', { style: { ...styles.empty, marginTop: 10 } }, '没有匹配的字段。') : null,
-            ),
-        ),
+            )
+          : null,
       )
     }
 
