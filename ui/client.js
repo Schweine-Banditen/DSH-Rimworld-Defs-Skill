@@ -267,6 +267,9 @@ window.__ModuleLoader__.load({
       leafSub: { color: 'var(--dsw-alias-label-secondary)', fontSize: 10.5, marginLeft: 4 },
       right: { flex: 1, overflow: 'auto', padding: '20px 24px' },
       empty: { color: 'var(--dsw-alias-label-secondary)', fontSize: 12.5 },
+      emptyState: { height: '100%', minHeight: 320, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, animation: 'rwFade .3s ease-out' },
+      emptyLogo: { width: 120, height: 120, objectFit: 'contain', opacity: 0.92, filter: 'drop-shadow(0 10px 28px rgba(0,0,0,.18))' },
+      emptyHint: { fontSize: 12.5, color: 'var(--dsw-alias-label-secondary)' },
       rootCard: {
         position: 'relative',
         display: 'flex',
@@ -793,6 +796,24 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /** 右侧空状态：居中展示 logo，图片不可用时自动退化为纯文字。 */
+    function EmptyState() {
+      const [failed, setFailed] = useState(false)
+      return h(
+        'div',
+        { style: styles.emptyState },
+        failed
+          ? null
+          : h('img', {
+              src: `${API}/brand`,
+              alt: 'RimWorld',
+              style: styles.emptyLogo,
+              onError: () => setFailed(true),
+            }),
+        h('div', { style: styles.emptyHint }, '在左侧展开来源与分类，或使用搜索。'),
+      )
+    }
+
     function Detail({ record }) {
       const [imageFailed, setImageFailed] = useState(false)
       const [material, setMaterial] = useState('default')
@@ -831,7 +852,7 @@ window.__ModuleLoader__.load({
       }
 
       if (!record) {
-        return h('div', { style: styles.empty }, '在左侧展开来源与分类，或使用搜索。')
+        return h(EmptyState)
       }
 
       const graphic = record.graphic || {}
