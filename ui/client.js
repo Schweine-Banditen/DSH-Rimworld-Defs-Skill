@@ -365,12 +365,15 @@ window.__ModuleLoader__.load({
       iconButton: { width: 30, height: 30, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer', fontSize: 15, lineHeight: 1 },
       descEditor: { marginBottom: 10 },
       textarea: { width: '100%', boxSizing: 'border-box', resize: 'vertical', minHeight: 54, fontSize: 12.5, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', fontFamily: 'inherit' },
-      saveError: { color: 'var(--dsw-alias-state-warn-primary)', fontSize: 12, marginBottom: 8 },
       notice: { color: 'var(--dsw-alias-label-secondary)', fontSize: 12, marginBottom: 8 },
-      backdrop: { position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0,0,0,.3)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'rwFade .16s ease-out' },
-      dialog: { width: 520, maxWidth: '92vw', maxHeight: '72vh', display: 'flex', flexDirection: 'column', background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 12, boxShadow: '0 18px 50px rgba(0,0,0,.3)', animation: 'rwDialogIn .2s cubic-bezier(.2,.7,.3,1)' },
-      dialogHead: { display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderBottom: '1px solid var(--dsw-alias-border-l1)' },
-      dialogList: { overflow: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 4 },
+      settingsMain: { position: 'relative', flex: 1, minWidth: 0, display: 'flex', minHeight: 0 },
+      overlay: { position: 'absolute', inset: 0, zIndex: 20, display: 'flex', background: 'rgba(0,0,0,.16)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', animation: 'rwFade .16s ease-out' },
+      overlayInner: { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, padding: '14px 18px', boxSizing: 'border-box', animation: 'rwDialogIn .2s cubic-bezier(.2,.7,.3,1)' },
+      overlayHead: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexShrink: 0 },
+      overlayList: { overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 4, paddingRight: 4, minHeight: 0 },
+      nameField: { display: 'flex', alignItems: 'center', gap: 6, width: 220, height: 28, padding: '0 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-2)', flex: '0 0 auto' },
+      nameInput: { flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', color: 'var(--dsw-alias-label-primary)', fontSize: 12.5, fontFamily: 'inherit' },
+      inlineError: { color: 'var(--dsw-alias-state-warn-primary)', fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 120 },
       setRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, cursor: 'pointer', border: '1px solid transparent', animation: 'rwSetIn .18s ease-out both' },
       setRowMain: { flex: 1, minWidth: 0 },
       setRowName: { fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 },
@@ -1148,7 +1151,6 @@ window.__ModuleLoader__.load({
         }
         setSetNames(Object.keys(SETS))
         setRevision((value) => value + 1)
-        setNotice(`已删除「${name}」`)
       }
 
       const translatedCount = Object.keys(TRANSLATIONS).length
@@ -1204,6 +1206,9 @@ window.__ModuleLoader__.load({
         ),
         h(
           'div',
+          { style: styles.settingsMain },
+          h(
+          'div',
           { style: styles.settingsBody },
           tab === 'tools'
             ? h(ToolSettings, { info: toolInfo })
@@ -1226,19 +1231,30 @@ window.__ModuleLoader__.load({
                 h(
                   'div',
                   { style: styles.setBar },
-                  h('input', {
-                    style: { ...styles.input, width: 180 },
-                    placeholder: '翻译集名称',
-                    value: newSetName,
-                    onChange: (event) => {
-                      setNewSetName(event.target.value)
-                      setSaveError('')
+                  h(
+                    'div',
+                    {
+                      style: {
+                        ...styles.nameField,
+                        borderColor: saveError ? 'var(--dsw-alias-state-warn-primary)' : undefined,
+                      },
                     },
-                    onKeyDown: (event) => {
-                      if (event.key === 'Enter') saveAs()
-                    },
-                    'aria-label': '翻译集名称',
-                  }),
+                    h('input', {
+                      style: styles.nameInput,
+                      placeholder: '翻译集名称',
+                      value: newSetName,
+                      onChange: (event) => {
+                        setNewSetName(event.target.value)
+                        setSaveError('')
+                      },
+                      onKeyDown: (event) => {
+                        if (event.key === 'Enter') saveAs()
+                      },
+                      'aria-label': '翻译集名称',
+                      'aria-invalid': saveError ? 'true' : undefined,
+                    }),
+                    saveError ? h('span', { style: styles.inlineError }, saveError) : null,
+                  ),
                   h(
                     'button',
                     {
@@ -1280,20 +1296,19 @@ window.__ModuleLoader__.load({
                     `临时集 ${translatedCount} 个字段${WORKING.source ? ` · 来自「${currentLabel}」` : ''}`,
                   ),
                 ),
-                descOpen
-                  ? h(
-                      'div',
-                      { style: styles.descEditor },
-                      h('textarea', {
-                        style: styles.textarea,
-                        rows: 2,
-                        placeholder: '给这个翻译集写一句描述（可选），会显示在翻译集列表里',
-                        value: newSetDesc,
-                        onChange: (event) => setNewSetDesc(event.target.value),
-                      }),
-                    )
-                  : null,
-                saveError ? h('div', { style: styles.saveError }, saveError) : null,
+                h(Collapse, { open: descOpen }, () =>
+                  h(
+                    'div',
+                    { style: styles.descEditor },
+                    h('textarea', {
+                      style: styles.textarea,
+                      rows: 2,
+                      placeholder: '给这个翻译集写一句描述（可选），会显示在翻译集列表里',
+                      value: newSetDesc,
+                      onChange: (event) => setNewSetDesc(event.target.value),
+                    }),
+                  ),
+                ),
                 notice ? h('div', { style: styles.notice }, notice) : null,
                 error ? h('div', { style: styles.empty }, `加载失败：${error}`) : null,
                 h(
@@ -1333,18 +1348,18 @@ window.__ModuleLoader__.load({
         dialogOpen
           ? h(
               'div',
-              { style: styles.backdrop, onClick: () => setDialogOpen(false) },
+              { style: styles.overlay, onClick: () => setDialogOpen(false) },
               h(
                 'div',
                 {
-                  style: styles.dialog,
+                  style: styles.overlayInner,
                   onClick: (event) => event.stopPropagation(),
                   role: 'dialog',
                   'aria-label': '翻译集列表',
                 },
                 h(
                   'div',
-                  { style: styles.dialogHead },
+                  { style: styles.overlayHead },
                   h('div', { style: { fontSize: 14, fontWeight: 600 } }, '翻译集'),
                   h('span', { style: styles.empty }, '点选即载入临时集；删除只影响命名集'),
                   h(
@@ -1355,7 +1370,7 @@ window.__ModuleLoader__.load({
                 ),
                 h(
                   'div',
-                  { style: styles.dialogList },
+                  { style: styles.overlayList },
                   setItems.map((item, index) =>
                     h(
                       'div',
@@ -1396,6 +1411,7 @@ window.__ModuleLoader__.load({
               ),
             )
           : null,
+        ),
       )
     }
 
