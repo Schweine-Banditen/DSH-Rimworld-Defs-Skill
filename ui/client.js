@@ -606,13 +606,21 @@ window.__ModuleLoader__.load({
       return sections
     }
 
-    function XmlPopover({ state, onClose }) {
+    function XmlPopover({ state, onClose, onEnter }) {
       if (!state) return null
-      const left = Math.min(state.x + 14, Math.max(10, window.innerWidth - 540))
-      const top = Math.min(state.y + 14, Math.max(10, window.innerHeight - 380))
+      // 以被悬停元素的矩形为锚点：贴着它下方；下方放不下就翻到上方。
+      // 这样弹层永远不会盖住鼠标，避免"出现即被 mouseleave 关掉"的抖动。
+      const width = 520
+      const height = 360
+      const anchor = state.anchor
+      const left = Math.max(8, Math.min(anchor.left, window.innerWidth - width - 12))
+      let top = anchor.bottom + 8
+      if (top + height > window.innerHeight - 8) {
+        top = Math.max(8, anchor.top - height - 8)
+      }
       return h(
         'div',
-        { style: { ...styles.popover, left, top }, onMouseLeave: onClose },
+        { style: { ...styles.popover, left, top }, onMouseEnter: onEnter, onMouseLeave: onClose },
         state.loading
           ? h('div', { style: styles.empty }, '加载 XML…')
           : h('pre', { style: styles.pre }, state.text),
@@ -623,13 +631,38 @@ window.__ModuleLoader__.load({
       const [imageFailed, setImageFailed] = useState(false)
       const [material, setMaterial] = useState('default')
       const [xmlState, setXmlState] = useState(null)
+      const closeTimer = useRef(0)
       const recordKey = record ? `${record.defType}:${record.defName || record.Name}` : 'none'
 
       useEffect(() => {
         setImageFailed(false)
         setMaterial('default')
         setXmlState(null)
+        if (closeTimer.current) {
+          clearTimeout(closeTimer.current)
+          closeTimer.current = 0
+        }
       }, [recordKey])
+
+      useEffect(() => () => {
+        if (closeTimer.current) clearTimeout(closeTimer.current)
+      }, [])
+
+      const cancelClose = () => {
+        if (closeTimer.current) {
+          clearTimeout(closeTimer.current)
+          closeTimer.current = 0
+        }
+      }
+
+      // 延迟关闭：给鼠标从文字移动到弹层留出时间（14px 间隙原本跨不过去）。
+      const scheduleClose = () => {
+        cancelClose()
+        closeTimer.current = window.setTimeout(() => {
+          closeTimer.current = 0
+          setXmlState(null)
+        }, 240)
+      }
 
       if (!record) {
         return h('div', { style: styles.empty }, '在左侧展开来源与分类，或使用搜索。')
@@ -655,20 +688,21 @@ window.__ModuleLoader__.load({
       const openXml = (event) => {
         const path = record.sourcePath
         event.preventDefault()
-        const x = event.clientX
-        const y = event.clientY
+        cancelClose()
+        const rect = event.currentTarget.getBoundingClientRect()
+        const anchor = { left: rect.left, top: rect.top, bottom: rect.bottom }
         if (XML_CACHE.has(path)) {
-          setXmlState({ x, y, text: buildSnippet(XML_CACHE.get(path), record), loading: false })
+          setXmlState({ anchor, text: buildSnippet(XML_CACHE.get(path), record), loading: false })
           return
         }
-        setXmlState({ x, y, text: '加载 XML…', loading: true })
+        setXmlState({ anchor, text: '加载 XML…', loading: true })
         fetch(`${API}/xml?path=${encodeURIComponent(path)}`)
           .then((response) => (response.ok ? response.text() : Promise.reject(new Error(`HTTP ${response.status}`))))
           .then((text) => {
             XML_CACHE.set(path, text)
-            setXmlState({ x, y, text: buildSnippet(text, record), loading: false })
+            setXmlState({ anchor, text: buildSnippet(text, record), loading: false })
           })
-          .catch((error) => setXmlState({ x, y, text: `读取失败：${error}`, loading: false }))
+          .catch((error) => setXmlState({ anchor, text: `读取失败：${error}`, loading: false }))
       }
 
       return h(
@@ -779,7 +813,7 @@ window.__ModuleLoader__.load({
                 {
                   style: { ...styles.attrVal, cursor: 'help', textDecoration: 'underline dotted' },
                   onMouseEnter: openXml,
-                  onMouseLeave: () => setXmlState(null),
+                  onMouseLeave: scheduleClose,
                 },
                 record.sourcePath,
               ),
@@ -792,7 +826,7 @@ window.__ModuleLoader__.load({
           { style: { ...styles.empty, marginTop: 14, lineHeight: 1.7 } },
           '静态模板层：不合并 ParentName 的字段；MayRequire 是原始条件；完整字段请打开 sourcePath 指向的 XML。',
         ),
-        h(XmlPopover, { state: xmlState, onClose: () => setXmlState(null) }),
+        h(XmlPopover, { state: xmlState, onClose: scheduleClose, onEnter: cancelClose }),
       )
     }
 
