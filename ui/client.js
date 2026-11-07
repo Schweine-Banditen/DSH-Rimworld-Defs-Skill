@@ -385,6 +385,8 @@ window.__ModuleLoader__.load({
       setBar: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' },
       chevronButton: { fontSize: 11, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer' },
       primaryButton: { fontSize: 12, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--dsw-alias-brand-primary)', background: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 16%, var(--dsw-alias-bg-layer-1))', color: 'var(--dsw-alias-brand-primary)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5, fontWeight: 600 },
+      button: { fontSize: 12, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer' },
+      saveError: { color: 'var(--dsw-alias-state-warn-primary)', fontSize: 12, marginBottom: 8 },
       paneHeader: { position: 'sticky', top: 0, zIndex: 5, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', margin: '-4px 0 10px', padding: '6px 0 8px', background: 'var(--dsw-alias-bg-base)' },
       backTop: { position: 'absolute', right: 18, bottom: 18, width: 38, height: 38, borderRadius: '50%', border: '1px solid var(--dsw-alias-border-l2)', background: 'color-mix(in srgb, var(--dsw-alias-bg-overlay) 78%, transparent)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', color: 'var(--dsw-alias-label-secondary)', fontSize: 16, lineHeight: 1, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 6px 18px rgba(0,0,0,.18)', zIndex: 10, animation: 'rwFade .16s ease-out' },
       iconButton: { width: 30, height: 30, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer', fontSize: 15, lineHeight: 1 },
@@ -414,11 +416,18 @@ window.__ModuleLoader__.load({
       workshopBody: { minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3, flex: 1 },
       workshopName: { fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
       workshopMeta: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' },
-      workshopDesc: { fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.5, maxHeight: 56, overflow: 'hidden', flex: '1 1 auto', cursor: 'help' },
+      workshopDesc: { fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.5, maxHeight: 56, overflow: 'hidden', flex: '1 1 auto', cursor: 'pointer' },
       workshopActions: { display: 'flex', gap: 6, marginTop: 'auto', paddingTop: 6, justifyContent: 'flex-end' },
       badgeOk: { fontSize: 10.5, padding: '0 6px', borderRadius: 999, border: '1px solid var(--dsw-alias-brand-primary)', color: 'var(--dsw-alias-brand-primary)' },
       badgeWarn: { fontSize: 10.5, padding: '0 6px', borderRadius: 999, border: '1px solid var(--dsw-alias-state-warn-primary)', color: 'var(--dsw-alias-state-warn-primary)' },
       updateButton: { fontSize: 12, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--dsw-alias-state-warn-primary)', background: 'transparent', color: 'var(--dsw-alias-state-warn-primary)', cursor: 'pointer' },
+      modalBackdrop: { position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(0,0,0,.28)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'rwFade .16s ease-out' },
+      modalPanel: { width: 680, maxWidth: '92vw', maxHeight: '82vh', display: 'flex', flexDirection: 'column', background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 14, boxShadow: '0 24px 64px rgba(0,0,0,.32)', animation: 'rwDialogIn .2s cubic-bezier(.2,.7,.3,1)' },
+      modalHead: { display: 'flex', gap: 12, alignItems: 'flex-start', padding: '16px 18px', borderBottom: '1px solid var(--dsw-alias-border-l1)' },
+      modalImage: { width: 96, height: 96, borderRadius: 10, objectFit: 'cover', flex: '0 0 auto', background: 'var(--dsw-alias-bg-layer-2)' },
+      modalBody: { overflow: 'auto', padding: '14px 18px', minHeight: 0 },
+      modalDesc: { fontSize: 12.5, lineHeight: 1.7, whiteSpace: 'pre-wrap', color: 'var(--dsw-alias-label-primary)' },
+      modalActions: { display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '12px 18px', borderTop: '1px solid var(--dsw-alias-border-l1)' },
       table: { width: '100%', borderCollapse: 'collapse', fontSize: 12.5 },
       th: { textAlign: 'left', color: 'var(--dsw-alias-label-secondary)', fontWeight: 600, padding: '6px 8px', borderBottom: '1px solid var(--dsw-alias-border-l2)' },
       td: { padding: '4px 8px', borderBottom: '1px solid var(--dsw-alias-border-l1)', verticalAlign: 'middle' },
@@ -1163,7 +1172,7 @@ window.__ModuleLoader__.load({
       const [error, setError] = useState('')
       const [notice, setNotice] = useState('')
       const [query, setQuery] = useState('')
-      const [descHover, setDescHover] = useState(null)
+      const [detailMod, setDetailMod] = useState(null)
 
       const loadState = useCallback(() => {
         fetch(`${API}/workshop/state`)
@@ -1175,6 +1184,15 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         loadState()
       }, [loadState])
+
+      useEffect(() => {
+        if (!detailMod) return undefined
+        const onKeyDown = (event) => {
+          if (event.key === 'Escape') setDetailMod(null)
+        }
+        window.addEventListener('keydown', onKeyDown)
+        return () => window.removeEventListener('keydown', onKeyDown)
+      }, [detailMod])
 
       const detect = async () => {
         setBusy('detect')
@@ -1287,15 +1305,8 @@ window.__ModuleLoader__.load({
                   'div',
                   {
                     style: styles.workshopDesc,
-                    onMouseEnter: (event) =>
-                      setDescHover({
-                        text: mod.description || '（无描述）',
-                        x: event.clientX,
-                        y: event.clientY,
-                      }),
-                    onMouseMove: (event) =>
-                      setDescHover((previous) => (previous ? { ...previous, x: event.clientX, y: event.clientY } : previous)),
-                    onMouseLeave: () => setDescHover(null),
+                    onClick: () => setDetailMod(mod),
+                    title: '点击查看完整简介',
                   },
                   mod.description || '（无描述）',
                 ),
@@ -1327,30 +1338,98 @@ window.__ModuleLoader__.load({
             ),
           ),
         ),
-        descHover
+        detailMod
           ? h(
               'div',
-              {
-                style: {
-                  position: 'fixed',
-                  left: Math.max(8, Math.min(descHover.x + 14, window.innerWidth - 400)),
-                  top: Math.max(8, Math.min(descHover.y + 14, window.innerHeight - 220)),
-                  width: 380,
-                  maxHeight: 200,
-                  overflow: 'auto',
-                  zIndex: 60,
-                  padding: '10px 12px',
-                  borderRadius: 8,
-                  border: '1px solid var(--dsw-alias-border-l2)',
-                  background: 'var(--dsw-alias-bg-overlay)',
-                  boxShadow: '0 12px 32px rgba(0,0,0,.28)',
-                  fontSize: 12,
-                  lineHeight: 1.6,
-                  whiteSpace: 'pre-wrap',
-                  pointerEvents: 'none',
+              { style: styles.modalBackdrop, onClick: () => setDetailMod(null) },
+              h(
+                'div',
+                {
+                  style: styles.modalPanel,
+                  onClick: (event) => event.stopPropagation(),
+                  role: 'dialog',
+                  'aria-label': detailMod.name,
                 },
-              },
-              descHover.text,
+                h(
+                  'div',
+                  { style: styles.modalHead },
+                  h('img', {
+                    src: `${API}/workshop/preview?id=${encodeURIComponent(detailMod.id)}`,
+                    alt: detailMod.name,
+                    style: styles.modalImage,
+                    onError: (event) => {
+                      event.currentTarget.src = PLACEHOLDER
+                    },
+                  }),
+                  h(
+                    'div',
+                    { style: { minWidth: 0, flex: 1 } },
+                    h('div', { style: { fontSize: 16, fontWeight: 600 } }, detailMod.name),
+                    h(
+                      'div',
+                      { style: styles.workshopMeta },
+                      `${detailMod.author || '未知作者'} · ${detailMod.packageId || detailMod.id}`,
+                    ),
+                    h(
+                      'div',
+                      { style: styles.workshopMeta },
+                      `${detailMod.updatedAt ? detailMod.updatedAt.slice(0, 10) : detailMod.version || '版本未知'}`,
+                      detailMod.pulled ? h('span', { style: styles.badgeOk }, `已拉取 ${detailMod.defsCount || 0}`) : null,
+                      detailMod.missing ? h('span', { style: styles.badgeWarn }, '工坊中未找到') : null,
+                    ),
+                  ),
+                  h(
+                    'button',
+                    { style: styles.iconButton, onClick: () => setDetailMod(null), 'aria-label': '关闭' },
+                    '×',
+                  ),
+                ),
+                h(
+                  'div',
+                  { style: styles.modalBody },
+                  h('div', { style: styles.modalDesc }, detailMod.description || '（无描述）'),
+                ),
+                h(
+                  'div',
+                  { style: styles.modalActions },
+                  detailMod.pulled && detailMod.updateAvailable
+                    ? h(
+                        'button',
+                        {
+                          style: styles.updateButton,
+                          onClick: () => {
+                            setDetailMod(null)
+                            pull(detailMod.id)
+                          },
+                        },
+                        '更新',
+                      )
+                    : null,
+                  detailMod.pulled
+                    ? h(
+                        'button',
+                        {
+                          style: styles.button,
+                          onClick: () => {
+                            setDetailMod(null)
+                            remove(detailMod.id)
+                          },
+                        },
+                        '删除',
+                      )
+                    : h(
+                        'button',
+                        {
+                          style: styles.primaryButton,
+                          onClick: () => {
+                            setDetailMod(null)
+                            pull(detailMod.id)
+                          },
+                        },
+                        '拉取',
+                      ),
+                ),
+              ),
             )
           : null,
       )
