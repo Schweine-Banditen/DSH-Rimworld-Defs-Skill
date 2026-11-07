@@ -1004,7 +1004,36 @@ window.__ModuleLoader__.load({
       return `${start > 0 ? '…\n' : ''}${text.slice(start, end)}${end < text.length ? '\n…' : ''}`
     }
 
-    function ToolSettings({ info }) {
+    /**
+     * 设置页分类标题：滚动后转为半透明毛玻璃，避免整块遮住下方内容；
+     * 鼠标移入或内部获得焦点时恢复实底。
+     */
+    function PaneHeader({ scrolled, children }) {
+      const [active, setActive] = useState(false)
+      const solid = !scrolled || active
+      return h(
+        'div',
+        {
+          style: {
+            ...styles.paneHeader,
+            background: solid ? 'var(--dsw-alias-bg-base)' : 'color-mix(in srgb, var(--dsw-alias-bg-base) 52%, transparent)',
+            backdropFilter: solid ? 'none' : 'blur(10px)',
+            WebkitBackdropFilter: solid ? 'none' : 'blur(10px)',
+            boxShadow: scrolled ? '0 6px 16px rgba(0,0,0,.08)' : 'none',
+            opacity: solid ? 1 : 0.9,
+            transition:
+              'background 180ms cubic-bezier(.2,.7,.3,1), opacity 180ms cubic-bezier(.2,.7,.3,1), box-shadow 180ms cubic-bezier(.2,.7,.3,1)',
+          },
+          onMouseEnter: () => setActive(true),
+          onMouseLeave: () => setActive(false),
+          onFocus: () => setActive(true),
+          onBlur: () => setActive(false),
+        },
+        children,
+      )
+    }
+
+    function ToolSettings({ info, scrolled }) {
       const tools = (info && info.tools) || []
       const registered = new Set((info && info.registered) || [])
       if (info === null) return h('div', { style: styles.empty }, '加载中…')
@@ -1014,8 +1043,8 @@ window.__ModuleLoader__.load({
         'div',
         null,
         h(
-          'div',
-          { style: styles.paneHeader },
+          PaneHeader,
+          { scrolled },
           h('div', { style: { fontSize: 15, fontWeight: 600 } }, '智能体工具'),
           h(
             'span',
@@ -1092,6 +1121,7 @@ window.__ModuleLoader__.load({
       const clusterRef = useRef(null)
       const bodyRef = useRef(null)
       const [showBackTop, setShowBackTop] = useState(false)
+      const [scrolled, setScrolled] = useState(false)
 
       useEffect(() => {
         fetch(`${API}/keys`)
@@ -1250,7 +1280,7 @@ window.__ModuleLoader__.load({
           'div',
           { style: styles.settingsTabs },
           [
-            { id: 'translation', label: '翻译' },
+            { id: 'translation', label: '静态字段' },
             { id: 'tools', label: '智能体工具' },
           ].map((item) =>
             h(
@@ -1272,17 +1302,21 @@ window.__ModuleLoader__.load({
           {
             style: styles.settingsBody,
             ref: bodyRef,
-            onScroll: (event) => setShowBackTop(event.currentTarget.scrollTop > 240),
+            onScroll: (event) => {
+              const top = event.currentTarget.scrollTop
+              setShowBackTop(top > 240)
+              setScrolled(top > 4)
+            },
           },
           tab === 'tools'
-            ? h(ToolSettings, { info: toolInfo })
+            ? h(ToolSettings, { info: toolInfo, scrolled })
             : h(
                 'div',
                 null,
                 h(
-                  'div',
-                  { style: styles.paneHeader },
-                  h('div', { style: { fontSize: 15, fontWeight: 600 } }, '翻译'),
+                  PaneHeader,
+                  { scrolled },
+                  h('div', { style: { fontSize: 15, fontWeight: 600 } }, '静态字段'),
                   h('span', { style: styles.empty }, '为字段名补充中文；填写后会在属性显示时追加。'),
                   h('input', {
                     style: { ...styles.input, width: 240, marginLeft: 'auto' },
