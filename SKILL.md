@@ -44,18 +44,18 @@ description: 查询 RimWorld（环世界）原版与官方 DLC 的 Def 定义资
 
 ## 查询方式
 
-### 工具：尚未接入（当前请用命令行）
+### 优先：智能体工具（已由面板注册）
 
-下面四个工具是目标形态，**尚未注册到会话**（见 `AGENTS.md` §7.2）。现在一律执行下一节的命令行；工具接入后参数与语义保持不变。
+面板插件启动时注册了下面四个工具，会话里直接调用即可；它们内部调用 `scripts/query_defs.py`，语义与命令行完全一致。
 
 | 工具 | 参数 | 用途 |
 | --- | --- | --- |
-| `search_def` | `defName`、可选 `defType`、`includeAbstract` | 精确查 defName（或模板 Name） |
-| `search_by_label` | `query`、`limit` | 中英文关键词模糊搜索 |
-| `list_by_source` | `source`、`limit` | 按 DLC/来源列出 |
-| `list_by_category` | `category`、`thingCategories`、`defType`、`limit` | 按分类组合过滤 |
+| `rimworld_search_def` | `defName`、可选 `defType`、`includeAbstract` | 精确查 defName（或模板 Name） |
+| `rimworld_search_by_label` | `query`、`limit` | 中英文关键词模糊搜索 |
+| `rimworld_list_by_source` | `source`、`limit` | 按 DLC/来源列出 |
+| `rimworld_list_by_category` | `category`、`thingCategories`、`defType`、`limit` | 按分类组合过滤 |
 
-### 当前可用：命令行
+### 回退：命令行
 
 在仓库根目录（即 Base directory）执行：
 
@@ -74,7 +74,7 @@ python scripts/query_defs.py list-category --category Item --thing-categories Re
 **1. 确认 defName 是否存在、由谁定义**
 
 ```
-search_def("Gun_Revolver") → 若无结果，说明拼写错误或该 Def 来自未扫描的模组；
+rimworld_search_def("Gun_Revolver") → 若无结果，说明拼写错误或该 Def 来自未扫描的模组；
 有结果时看 defType、source（Core/DLC）、sourcePath。
 ```
 
@@ -83,7 +83,7 @@ CLI：`python scripts/query_defs.py search-def Gun_Revolver`
 **2. 写 ``<PatchOperationReplace>`` 前确认父级**
 
 ```
-search_def("Apparel_PowerArmor") → 看 parentChain 与 parentResolved；
+rimworld_search_def("Apparel_PowerArmor") → 看 parentChain 与 parentResolved；
 parentResolved 为 false 时不要假设字段齐全。
 ```
 
@@ -92,7 +92,7 @@ CLI：`python scripts/query_defs.py search-def Apparel_PowerArmor`
 **3. 查分类（写 recipe 的 thingCategories、筛选建筑）**
 
 ```
-list_by_category(defType="ThingDef", thingCategories=["ResourcesRaw"])
+rimworld_list_by_category(defType="ThingDef", thingCategories=["ResourcesRaw"])
 ```
 
 CLI：`python scripts/query_defs.py list-category --category Item --thing-categories ResourcesRaw --def-type ThingDef`
@@ -102,7 +102,7 @@ CLI：`python scripts/query_defs.py list-category --category Item --thing-catego
 **4. 查中英文显示名**
 
 ```
-search_by_label("钢") / search_by_label("steel")
+rimworld_search_by_label("钢") / rimworld_search_by_label("steel")
 ```
 
 CLI：`python scripts/query_defs.py search-label 钢 --limit 10`
@@ -112,7 +112,7 @@ CLI：`python scripts/query_defs.py search-label 钢 --limit 10`
 **5. 查贴图路径**
 
 ```
-search_def("Steel") → graphic.effective.texPath
+rimworld_search_def("Steel") → graphic.effective.texPath
 ```
 
 CLI：`python scripts/query_defs.py search-def Steel --def-type ThingDef`
@@ -122,7 +122,7 @@ CLI：`python scripts/query_defs.py search-def Steel --def-type ThingDef`
 **6. 判断内容是否来自 DLC**
 
 ```
-list_by_source("Royalty") / 看 def 的 source 与 MayRequire
+rimworld_list_by_source("Royalty") / 看 def 的 source 与 MayRequire
 ```
 
 CLI：`python scripts/query_defs.py list-source Royalty --limit 20`

@@ -71,6 +71,23 @@ New-Item -ItemType Junction `
 
 为什么不用全局配置：改 `~/.dsh/profiles/<profile>/cordis.patch.yml` 的 `customSkillDirs` 也能生效，但那是**进程级**配置，会影响该 profile 下所有会话；本仓库只需要服务固定工作目录，故用会话级的项目根。
 
+### 4.2 智能体工具（设置 → 智能体工具）
+
+面板的 Host 半在启动时把查询层注册为 DSH 工具，会话里可直接调用：
+
+| 工具 | 参数 | 用途 |
+| --- | --- | --- |
+| `rimworld_search_def` | `defName`、可选 `defType`、`includeAbstract` | 精确查 defName（或抽象模板 Name） |
+| `rimworld_search_by_label` | `query`、`limit` | 中英文关键词模糊搜索 |
+| `rimworld_list_by_source` | `source`、`limit` | 按来源列出 |
+| `rimworld_list_by_category` | `category`、`thingCategories`、`defType`、`limit` | 按分类组合过滤 |
+
+- 工具**不重写查询逻辑**，一律调用 `scripts/query_defs.py`，语义与命令行完全一致；
+- 注册用作用域 `ctx.inject(['tools'])`：没有 `tools` 服务的环境（headless / 精简 profile）自动跳过，面板照常工作；
+- 面板右上角齿轮 → **智能体工具**：列出每个工具的名称、参数、必填与用法，并标注「已注册 / 未注册」；该页**不需要任何配置**；
+- 显示「未注册」时：看启动日志里的 `已注册 N 个智能体工具`，确认当前 profile 是否加载了 `tools` 服务；
+- `ui/tools.js`、`ui/query.js` 属于 Host 半，改动后**需要重启 DSH** 才生效。
+
 ## 5. 数据更新流程
 
 游戏更新后：

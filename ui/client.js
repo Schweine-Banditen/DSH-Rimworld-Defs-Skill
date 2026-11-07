@@ -266,6 +266,14 @@ window.__ModuleLoader__.load({
       table: { width: '100%', borderCollapse: 'collapse', fontSize: 12.5 },
       th: { textAlign: 'left', color: 'var(--dsw-alias-label-secondary)', fontWeight: 600, padding: '6px 8px', borderBottom: '1px solid var(--dsw-alias-border-l2)' },
       td: { padding: '4px 8px', borderBottom: '1px solid var(--dsw-alias-border-l1)', verticalAlign: 'middle' },
+      toolCard: { border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 8, padding: '12px 14px', marginBottom: 12 },
+      toolHead: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 },
+      toolName: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13, fontWeight: 600 },
+      toolBadge: { marginLeft: 'auto', fontSize: 11.5, padding: '1px 7px', borderRadius: 999, color: 'var(--dsw-alias-brand-primary)', border: '1px solid var(--dsw-alias-brand-primary)' },
+      toolBadgeOff: { marginLeft: 'auto', fontSize: 11.5, padding: '1px 7px', borderRadius: 999, color: 'var(--dsw-alias-label-secondary)', border: '1px solid var(--dsw-alias-border-l2)' },
+      toolTitle: { fontSize: 12.5, fontWeight: 600, marginBottom: 2 },
+      toolDesc: { fontSize: 12.5, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.6, marginBottom: 6 },
+      toolUsage: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, background: 'var(--dsw-alias-bg-layer-1)', padding: '6px 8px', borderRadius: 6, marginBottom: 8, overflowX: 'auto' },
       input: {
         width: '100%',
         padding: '4px 8px',
@@ -714,18 +722,94 @@ window.__ModuleLoader__.load({
       return `${start > 0 ? '…\n' : ''}${text.slice(start, end)}${end < text.length ? '\n…' : ''}`
     }
 
+    function ToolSettings({ info }) {
+      const tools = (info && info.tools) || []
+      const registered = new Set((info && info.registered) || [])
+      if (info === null) return h('div', { style: styles.empty }, '加载中…')
+      if (tools.length === 0) return h('div', { style: styles.empty }, '面板未提供工具目录。')
+
+      return h(
+        'div',
+        null,
+        h(
+          'div',
+          { style: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 } },
+          h('div', { style: { fontSize: 15, fontWeight: 600 } }, '智能体工具'),
+          h(
+            'span',
+            { style: styles.empty },
+            '无需配置。这些工具由面板插件注册，会话中可直接调用；这里只列出名称、参数与用法。',
+          ),
+        ),
+        tools.map((tool) =>
+          h(
+            'div',
+            { key: tool.name, style: styles.toolCard },
+            h(
+              'div',
+              { style: styles.toolHead },
+              h('code', { style: styles.toolName }, tool.name),
+              h(
+                'span',
+                { style: registered.has(tool.name) ? styles.toolBadge : styles.toolBadgeOff },
+                registered.has(tool.name) ? '已注册' : '未注册',
+              ),
+            ),
+            h('div', { style: styles.toolTitle }, `${tool.title} · ${tool.summary}`),
+            h('div', { style: styles.toolDesc }, tool.description),
+            h('div', { style: styles.toolUsage }, tool.usage),
+            h(
+              'table',
+              { style: styles.table },
+              h(
+                'thead',
+                null,
+                h(
+                  'tr',
+                  null,
+                  h('th', { style: styles.th }, '参数'),
+                  h('th', { style: styles.th }, '类型'),
+                  h('th', { style: styles.th }, '必填'),
+                  h('th', { style: styles.th }, '说明'),
+                ),
+              ),
+              h(
+                'tbody',
+                null,
+                tool.parameters.map((param) =>
+                  h(
+                    'tr',
+                    { key: param.name },
+                    h('td', { style: styles.td }, h('code', null, param.name)),
+                    h('td', { style: styles.td }, param.type),
+                    h('td', { style: styles.td }, param.required ? '是' : '否'),
+                    h('td', { style: styles.td }, param.description),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      )
+    }
+
     function SettingsPanel({ onBack }) {
       const [tab, setTab] = useState('translation')
       const [keys, setKeys] = useState([])
       const [query, setQuery] = useState('')
       const [revision, setRevision] = useState(0)
       const [error, setError] = useState(null)
+      const [toolInfo, setToolInfo] = useState(null)
 
       useEffect(() => {
         fetch(`${API}/keys`)
           .then((response) => response.json())
           .then((payload) => setKeys(payload.keys || []))
           .catch((err) => setError(String(err)))
+        fetch(`${API}/tools`)
+          .then((response) => response.json())
+          .then((payload) => setToolInfo(payload))
+          .catch(() => setToolInfo({ tools: [], registered: [] }))
       }, [])
 
       const filtered = keys.filter((key) => {
@@ -747,19 +831,30 @@ window.__ModuleLoader__.load({
         h(
           'div',
           { style: styles.settingsTabs },
-          h(
-            'div',
-            {
-              style: { ...styles.tabItem, ...(tab === 'translation' ? styles.tabActive : null) },
-              onClick: () => setTab('translation'),
-            },
-            '翻译',
+          [
+            { id: 'translation', label: '翻译' },
+            { id: 'tools', label: '智能体工具' },
+          ].map((item) =>
+            h(
+              'div',
+              {
+                key: item.id,
+                style: { ...styles.tabItem, ...(tab === item.id ? styles.tabActive : null) },
+                onClick: () => setTab(item.id),
+              },
+              item.label,
+            ),
           ),
         ),
         h(
           'div',
           { style: styles.settingsBody },
-          h(
+          tab === 'tools'
+            ? h(ToolSettings, { info: toolInfo })
+            : h(
+            'div',
+            null,
+            h(
             'div',
             { style: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 } },
             h('div', { style: { fontSize: 15, fontWeight: 600 } }, '翻译'),
@@ -801,6 +896,7 @@ window.__ModuleLoader__.load({
             ),
           ),
           filtered.length === 0 ? h('div', { style: { ...styles.empty, marginTop: 10 } }, '没有匹配的字段。') : null,
+            ),
         ),
       )
     }
