@@ -22,20 +22,112 @@ window.__ModuleLoader__.load({
       { id: 'uranium', label: '铀矿（淡灰）', color: '#b9bcc4' },
     ]
 
-    let TRANSLATIONS = {}
+    // ---- 翻译集：命名快照 + 单一临时集 ----
+    // 临时集永远只有一份，逐字保存当前表格；命名集是用户手动保存的快照。
+    const SETS_KEY = 'rimworld-defs.translation-sets'
+    const WORKING_KEY = 'rimworld-defs.translation-working'
+    const LEGACY_PROFILE_KEY = 'rimworld-defs.translation-profiles'
+    const PRESET_CACHE_KEY = 'rimworld-defs.preset.zh-CN'
+    const DEFAULT_SET = 'default'
+    const BUILTIN_PRESET = 'zh-CN'
+    const WORKING_SET = 'working'
+
+    let BUILTIN = null
     try {
-      TRANSLATIONS = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') || {}
+      BUILTIN = JSON.parse(localStorage.getItem(PRESET_CACHE_KEY) || 'null')
     } catch {
-      TRANSLATIONS = {}
+      BUILTIN = null
     }
 
-    function saveTranslations() {
+    let TRANSLATIONS = {}
+    let SETS = {}
+    let WORKING = { source: null }
+
+    function readStorage(key, fallback) {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(TRANSLATIONS))
+        const raw = localStorage.getItem(key)
+        return raw ? JSON.parse(raw) : fallback
       } catch {
-        /* ignore quota errors */
+        return fallback
       }
     }
+
+    function writeStorage(key, value) {
+      try {
+        localStorage.setItem(key, JSON.stringify(value))
+      } catch {
+        /* 配额满时静默失败：翻译只是本地便利功能 */
+      }
+    }
+
+    function replaceTranslations(entries) {
+      for (const key of Object.keys(TRANSLATIONS)) delete TRANSLATIONS[key]
+      Object.assign(TRANSLATIONS, entries || {})
+    }
+
+    function persistSets() {
+      writeStorage(SETS_KEY, SETS)
+    }
+
+    /** 临时集逐字落盘——这就是「用户最后修改」的唯一副本。 */
+    function persistWorking() {
+      writeStorage(WORKING_KEY, { entries: { ...TRANSLATIONS }, source: WORKING.source })
+    }
+
+    function setLabel(id) {
+      if (id === DEFAULT_SET) return '默认（空）'
+      if (id === BUILTIN_PRESET) return (BUILTIN && BUILTIN.label) || '简体中文（内置）'
+      if (id === WORKING_SET) return '临时修改'
+      return id
+    }
+
+    (function bootTranslations() {
+      // 1) 命名集：优先新键；否则从上一版（{active, sets}）迁移
+      let migratedEntries = null
+      let migratedSource = null
+      const saved = readStorage(SETS_KEY, null)
+      if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+        for (const [name, value] of Object.entries(saved)) {
+          if (!value || typeof value !== 'object') continue
+          if (value.entries && typeof value.entries === 'object') {
+            SETS[name] = {
+              description: typeof value.description === 'string' ? value.description : '',
+              entries: value.entries,
+            }
+          } else {
+            SETS[name] = { description: '', entries: value }
+          }
+        }
+      } else {
+        const legacy = readStorage(LEGACY_PROFILE_KEY, null)
+        if (legacy && legacy.sets && typeof legacy.sets === 'object') {
+          for (const [name, value] of Object.entries(legacy.sets)) {
+            if (value && typeof value === 'object') SETS[name] = { description: '', entries: value }
+          }
+          if (Object.keys(SETS).length > 0) persistSets()
+          // 上一版把"当前编辑内容"存在 active 集合里，这里顺手接成临时集
+          if (legacy.active && SETS[legacy.active]) {
+            migratedEntries = SETS[legacy.active].entries
+            migratedSource = legacy.active
+          }
+        }
+      }
+
+      // 2) 临时集：优先自己的键；否则用上一版的工作表 / 更早的单表
+      const working = readStorage(WORKING_KEY, null)
+      const legacyTable = readStorage(STORAGE_KEY, null)
+      if (working && working.entries && typeof working.entries === 'object') {
+        replaceTranslations(working.entries)
+        WORKING.source = typeof working.source === 'string' ? working.source : null
+      } else if (migratedEntries) {
+        replaceTranslations(migratedEntries)
+        WORKING.source = migratedSource
+      } else if (legacyTable && typeof legacyTable === 'object' && Object.keys(legacyTable).length > 0) {
+        replaceTranslations(legacyTable)
+        WORKING.source = null
+      }
+      persistWorking()
+    })()
 
     function zhOf(key) {
       const value = TRANSLATIONS[key]
@@ -54,10 +146,14 @@ window.__ModuleLoader__.load({
       @keyframes rwRowIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
       @keyframes rwExpand { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
       @keyframes rwFlash { 0% { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 35%, transparent); } 100% { background: transparent; } }
+      @keyframes rwFade { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes rwDialogIn { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+      @keyframes rwSetIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
       .rw-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
       .rw-scroll::-webkit-scrollbar-thumb { background: var(--dsw-alias-border-l2); border-radius: 4px; }
       .rw-row:hover { background: var(--dsw-alias-bg-layer-2); }
       .rw-attr:hover { background: var(--dsw-alias-bg-layer-2); }
+      .rw-set-row:hover { background: var(--dsw-alias-bg-layer-2); }
     `
 
     const styles = {
@@ -263,6 +359,32 @@ window.__ModuleLoader__.load({
       tabItem: { padding: '7px 10px', borderRadius: 7, cursor: 'pointer', fontSize: 12.5 },
       tabActive: { background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-brand-primary)' },
       settingsBody: { flex: 1, overflow: 'auto', padding: '16px 22px' },
+      setBar: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' },
+      chevronButton: { fontSize: 11, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer' },
+      primaryButton: { fontSize: 12, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--dsw-alias-brand-primary)', background: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 16%, var(--dsw-alias-bg-layer-1))', color: 'var(--dsw-alias-brand-primary)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5, fontWeight: 600 },
+      paneHeader: { position: 'sticky', top: 0, zIndex: 5, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', margin: '-4px 0 10px', padding: '6px 0 8px', background: 'var(--dsw-alias-bg-base)' },
+      backTop: { position: 'absolute', right: 18, bottom: 18, width: 38, height: 38, borderRadius: '50%', border: '1px solid var(--dsw-alias-border-l2)', background: 'color-mix(in srgb, var(--dsw-alias-bg-overlay) 78%, transparent)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', color: 'var(--dsw-alias-label-secondary)', fontSize: 16, lineHeight: 1, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 6px 18px rgba(0,0,0,.18)', zIndex: 10, animation: 'rwFade .16s ease-out' },
+      iconButton: { width: 30, height: 30, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer', fontSize: 15, lineHeight: 1 },
+      saveCluster: { position: 'relative', display: 'flex', alignItems: 'center', gap: 8 },
+      descPopover: { position: 'absolute', top: 'calc(100% + 6px)', left: 0, width: 320, zIndex: 30, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-overlay)', boxShadow: '0 12px 32px rgba(0,0,0,.28)' },
+      textarea: { width: '100%', boxSizing: 'border-box', resize: 'vertical', minHeight: 54, fontSize: 12.5, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', fontFamily: 'inherit' },
+      notice: { color: 'var(--dsw-alias-label-secondary)', fontSize: 12, marginBottom: 8 },
+      settingsMain: { position: 'relative', flex: 1, minWidth: 0, display: 'flex', minHeight: 0 },
+      overlay: { position: 'absolute', inset: 0, zIndex: 20, display: 'flex', background: 'rgba(0,0,0,.16)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', animation: 'rwFade .16s ease-out' },
+      overlayInner: { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, padding: '14px 18px', boxSizing: 'border-box', animation: 'rwDialogIn .2s cubic-bezier(.2,.7,.3,1)' },
+      overlayHead: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexShrink: 0 },
+      overlayList: { overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 4, paddingRight: 4, minHeight: 0 },
+      nameField: { display: 'flex', alignItems: 'center', gap: 6, width: 220, height: 28, padding: '0 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-2)', flex: '0 0 auto' },
+      nameInput: { flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', color: 'var(--dsw-alias-label-primary)', fontSize: 12.5, fontFamily: 'inherit' },
+      inlineError: { color: 'var(--dsw-alias-state-warn-primary)', fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 120 },
+      setRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, cursor: 'pointer', border: '1px solid transparent', animation: 'rwSetIn .18s ease-out both' },
+      setRowMain: { flex: 1, minWidth: 0 },
+      setRowName: { fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 },
+      setRowDesc: { fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+      setRowMeta: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', marginTop: 2 },
+      currentBadge: { fontSize: 10.5, padding: '0 6px', borderRadius: 999, border: '1px solid var(--dsw-alias-brand-primary)', color: 'var(--dsw-alias-brand-primary)' },
+      setDelete: { fontSize: 11.5, padding: '3px 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2)', background: 'transparent', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer' },
+      setLocked: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' },
       table: { width: '100%', borderCollapse: 'collapse', fontSize: 12.5 },
       th: { textAlign: 'left', color: 'var(--dsw-alias-label-secondary)', fontWeight: 600, padding: '6px 8px', borderBottom: '1px solid var(--dsw-alias-border-l2)' },
       td: { padding: '4px 8px', borderBottom: '1px solid var(--dsw-alias-border-l1)', verticalAlign: 'middle' },
@@ -405,6 +527,50 @@ window.__ModuleLoader__.load({
           },
           typeof children === 'function' ? children() : children,
         ),
+      )
+    }
+
+    /**
+     * 轻量浮层：只做 opacity / transform 过渡，不占据布局流。
+     * 收起后延迟卸载，保证有淡出；动画只走合成层，避免重排卡顿。
+     */
+    function PopLayer({ open, style, children }) {
+      const [mounted, setMounted] = useState(open)
+      const [shown, setShown] = useState(open)
+
+      useEffect(() => {
+        let first = 0
+        let second = 0
+        let timer = 0
+        if (open) {
+          setMounted(true)
+          first = requestAnimationFrame(() => {
+            second = requestAnimationFrame(() => setShown(true))
+          })
+        } else {
+          setShown(false)
+          timer = setTimeout(() => setMounted(false), 200)
+        }
+        return () => {
+          if (first) cancelAnimationFrame(first)
+          if (second) cancelAnimationFrame(second)
+          if (timer) clearTimeout(timer)
+        }
+      }, [open])
+
+      if (!mounted) return null
+      return h(
+        'div',
+        {
+          style: {
+            ...style,
+            opacity: shown ? 1 : 0,
+            transform: shown ? 'translateY(0)' : 'translateY(-4px)',
+            transition: 'opacity 180ms cubic-bezier(.2,.7,.3,1), transform 180ms cubic-bezier(.2,.7,.3,1)',
+            pointerEvents: open ? 'auto' : 'none',
+          },
+        },
+        children,
       )
     }
 
@@ -838,7 +1004,36 @@ window.__ModuleLoader__.load({
       return `${start > 0 ? '…\n' : ''}${text.slice(start, end)}${end < text.length ? '\n…' : ''}`
     }
 
-    function ToolSettings({ info }) {
+    /**
+     * 设置页分类标题：滚动后转为半透明毛玻璃，避免整块遮住下方内容；
+     * 鼠标移入或内部获得焦点时恢复实底。
+     */
+    function PaneHeader({ scrolled, children }) {
+      const [active, setActive] = useState(false)
+      const solid = !scrolled || active
+      return h(
+        'div',
+        {
+          style: {
+            ...styles.paneHeader,
+            background: solid ? 'var(--dsw-alias-bg-base)' : 'color-mix(in srgb, var(--dsw-alias-bg-base) 52%, transparent)',
+            backdropFilter: solid ? 'none' : 'blur(10px)',
+            WebkitBackdropFilter: solid ? 'none' : 'blur(10px)',
+            boxShadow: scrolled ? '0 6px 16px rgba(0,0,0,.08)' : 'none',
+            opacity: solid ? 1 : 0.9,
+            transition:
+              'background 180ms cubic-bezier(.2,.7,.3,1), opacity 180ms cubic-bezier(.2,.7,.3,1), box-shadow 180ms cubic-bezier(.2,.7,.3,1)',
+          },
+          onMouseEnter: () => setActive(true),
+          onMouseLeave: () => setActive(false),
+          onFocus: () => setActive(true),
+          onBlur: () => setActive(false),
+        },
+        children,
+      )
+    }
+
+    function ToolSettings({ info, scrolled }) {
       const tools = (info && info.tools) || []
       const registered = new Set((info && info.registered) || [])
       if (info === null) return h('div', { style: styles.empty }, '加载中…')
@@ -848,8 +1043,8 @@ window.__ModuleLoader__.load({
         'div',
         null,
         h(
-          'div',
-          { style: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 } },
+          PaneHeader,
+          { scrolled },
           h('div', { style: { fontSize: 15, fontWeight: 600 } }, '智能体工具'),
           h(
             'span',
@@ -916,6 +1111,17 @@ window.__ModuleLoader__.load({
       const [revision, setRevision] = useState(0)
       const [error, setError] = useState(null)
       const [toolInfo, setToolInfo] = useState(null)
+      const [setNames, setSetNames] = useState(() => Object.keys(SETS))
+      const [dialogOpen, setDialogOpen] = useState(false)
+      const [newSetName, setNewSetName] = useState('')
+      const [newSetDesc, setNewSetDesc] = useState('')
+      const [descOpen, setDescOpen] = useState(false)
+      const [saveError, setSaveError] = useState('')
+      const [notice, setNotice] = useState('')
+      const clusterRef = useRef(null)
+      const bodyRef = useRef(null)
+      const [showBackTop, setShowBackTop] = useState(false)
+      const [scrolled, setScrolled] = useState(false)
 
       useEffect(() => {
         fetch(`${API}/keys`)
@@ -926,7 +1132,34 @@ window.__ModuleLoader__.load({
           .then((response) => response.json())
           .then((payload) => setToolInfo(payload))
           .catch(() => setToolInfo({ tools: [], registered: [] }))
+        fetch(`${API}/presets`)
+          .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`))))
+          .then((preset) => {
+            BUILTIN = preset
+            writeStorage(PRESET_CACHE_KEY, preset)
+            setRevision((value) => value + 1)
+          })
+          .catch(() => setNotice('内置翻译集未加载：/presets 接口需要重启 DSH 后可用'))
       }, [])
+
+      useEffect(() => {
+        if (!dialogOpen) return undefined
+        const onKeyDown = (event) => {
+          if (event.key === 'Escape') setDialogOpen(false)
+        }
+        window.addEventListener('keydown', onKeyDown)
+        return () => window.removeEventListener('keydown', onKeyDown)
+      }, [dialogOpen])
+
+      useEffect(() => {
+        if (!descOpen) return undefined
+        const onPointerDown = (event) => {
+          if (clusterRef.current && clusterRef.current.contains(event.target)) return
+          setDescOpen(false)
+        }
+        document.addEventListener('mousedown', onPointerDown)
+        return () => document.removeEventListener('mousedown', onPointerDown)
+      }, [descOpen])
 
       const filtered = keys.filter((key) => {
         const needle = query.trim().toLowerCase()
@@ -934,12 +1167,111 @@ window.__ModuleLoader__.load({
         return key.toLowerCase().includes(needle) || zhOf(key).toLowerCase().includes(needle)
       })
 
+      const ensurePreset = async () => {
+        if (BUILTIN && BUILTIN.entries) return BUILTIN
+        const response = await fetch(`${API}/presets`)
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const preset = await response.json()
+        BUILTIN = preset
+        writeStorage(PRESET_CACHE_KEY, preset)
+        return preset
+      }
+
+      const loadSet = async (id) => {
+        setDialogOpen(false)
+        if (id === WORKING_SET) {
+          setNotice('临时修改保持不变')
+          return
+        }
+        try {
+          let entries = {}
+          if (id === BUILTIN_PRESET) entries = (await ensurePreset()).entries || {}
+          else if (id !== DEFAULT_SET) entries = (SETS[id] && SETS[id].entries) || {}
+          replaceTranslations(entries)
+          WORKING.source = id === DEFAULT_SET ? null : id
+          persistWorking()
+          setRevision((value) => value + 1)
+          setNotice(`已载入「${setLabel(id)}」· ${Object.keys(entries).length} 个字段`)
+        } catch (err) {
+          setNotice(`载入失败：${err.message}（新增接口需要重启 DSH 才生效）`)
+        }
+      }
+
       const setValue = (key, value) => {
         if (value.trim()) TRANSLATIONS[key] = value
         else delete TRANSLATIONS[key]
-        saveTranslations()
-        setRevision(revision + 1)
+        persistWorking()
+        setRevision((value) => value + 1)
       }
+
+      const saveAs = () => {
+        const name = newSetName.trim()
+        if (!name) {
+          setSaveError('请先填写翻译集名称')
+          return
+        }
+        if (name === DEFAULT_SET || name === BUILTIN_PRESET || name === WORKING_SET) {
+          setSaveError('该名称是保留名，请换一个')
+          return
+        }
+        if (SETS[name]) {
+          setSaveError('已存在同名翻译集，请换一个名称')
+          return
+        }
+        SETS[name] = { description: newSetDesc.trim(), entries: { ...TRANSLATIONS } }
+        persistSets()
+        WORKING.source = name
+        persistWorking()
+        setSetNames(Object.keys(SETS))
+        setNewSetName('')
+        setNewSetDesc('')
+        setDescOpen(false)
+        setSaveError('')
+        setRevision((value) => value + 1)
+        setNotice(`已保存「${name}」· ${Object.keys(TRANSLATIONS).length} 个字段`)
+      }
+
+      const deleteSet = (name) => {
+        if (!SETS[name]) return
+        delete SETS[name]
+        persistSets()
+        if (WORKING.source === name) {
+          WORKING.source = null
+          persistWorking()
+        }
+        setSetNames(Object.keys(SETS))
+        setRevision((value) => value + 1)
+      }
+
+      const translatedCount = Object.keys(TRANSLATIONS).length
+      const builtinCount = BUILTIN && BUILTIN.entries ? Object.keys(BUILTIN.entries).length : 0
+      const currentLabel = WORKING.source ? setLabel(WORKING.source) : '未命名'
+
+      const setItems = [
+        {
+          id: WORKING_SET,
+          name: '临时修改',
+          description: WORKING.source ? `你最近的修改（来自「${setLabel(WORKING.source)}」）` : '你最近的修改',
+          count: translatedCount,
+          deletable: false,
+          current: true,
+        },
+        { id: DEFAULT_SET, name: '默认（空）', description: '清空当前表格，从零开始', count: 0, deletable: false },
+        {
+          id: BUILTIN_PRESET,
+          name: (BUILTIN && BUILTIN.label) || '简体中文（内置）',
+          description: (BUILTIN && BUILTIN.description) || '内置中文翻译（未加载，需重启 DSH）',
+          count: builtinCount,
+          deletable: false,
+        },
+        ...setNames.map((name) => ({
+          id: name,
+          name,
+          description: (SETS[name] && SETS[name].description) || '（无描述）',
+          count: Object.keys((SETS[name] && SETS[name].entries) || {}).length,
+          deletable: true,
+        })),
+      ]
 
       return h(
         'div',
@@ -948,7 +1280,7 @@ window.__ModuleLoader__.load({
           'div',
           { style: styles.settingsTabs },
           [
-            { id: 'translation', label: '翻译' },
+            { id: 'translation', label: '静态字段' },
             { id: 'tools', label: '智能体工具' },
           ].map((item) =>
             h(
@@ -964,55 +1296,259 @@ window.__ModuleLoader__.load({
         ),
         h(
           'div',
-          { style: styles.settingsBody },
-          tab === 'tools'
-            ? h(ToolSettings, { info: toolInfo })
-            : h(
-            'div',
-            null,
-            h(
-            'div',
-            { style: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 } },
-            h('div', { style: { fontSize: 15, fontWeight: 600 } }, '翻译'),
-            h('span', { style: styles.empty }, '为字段名补充中文；填写后会在属性显示时追加。'),
-            h('input', {
-              style: { ...styles.input, width: 240, marginLeft: 'auto' },
-              placeholder: '搜索字段或中文',
-              value: query,
-              onChange: (event) => setQuery(event.target.value),
-              'aria-label': '搜索字段',
-            }),
-          ),
-          error ? h('div', { style: styles.empty }, `加载失败：${error}`) : null,
+          { style: styles.settingsMain },
           h(
-            'table',
-            { style: styles.table },
-            h('thead', null, h('tr', null, h('th', { style: styles.th }, '英文关键字段'), h('th', { style: styles.th }, '中文（自定义）'))),
-            h(
-              'tbody',
-              null,
-              filtered.map((key) =>
+          'div',
+          {
+            style: styles.settingsBody,
+            ref: bodyRef,
+            onScroll: (event) => {
+              const top = event.currentTarget.scrollTop
+              setShowBackTop(top > 240)
+              setScrolled(top > 4)
+            },
+          },
+          tab === 'tools'
+            ? h(ToolSettings, { info: toolInfo, scrolled })
+            : h(
+                'div',
+                null,
                 h(
-                  'tr',
-                  { key },
-                  h('td', { style: styles.td }, key),
+                  PaneHeader,
+                  { scrolled },
+                  h('div', { style: { fontSize: 15, fontWeight: 600 } }, '静态字段'),
+                  h('span', { style: styles.empty }, '为字段名补充中文；填写后会在属性显示时追加。'),
+                  h('input', {
+                    style: { ...styles.input, width: 240, marginLeft: 'auto' },
+                    placeholder: '搜索字段或中文',
+                    value: query,
+                    onChange: (event) => setQuery(event.target.value),
+                    'aria-label': '搜索字段',
+                  }),
+                ),
+                h(
+                  'div',
+                  { style: styles.setBar },
                   h(
-                    'td',
-                    { style: styles.td },
+                    'div',
+                    { style: styles.saveCluster, ref: clusterRef },
+                  h(
+                    'div',
+                    {
+                      style: {
+                        ...styles.nameField,
+                        borderColor: saveError ? 'var(--dsw-alias-state-warn-primary)' : undefined,
+                      },
+                    },
                     h('input', {
-                      style: styles.input,
-                      value: TRANSLATIONS[key] || '',
-                      placeholder: '留空则不追加',
-                      onChange: (event) => setValue(key, event.target.value),
-                      'aria-label': `翻译 ${key}`,
+                      style: styles.nameInput,
+                      placeholder: '翻译集名称',
+                      value: newSetName,
+                      onChange: (event) => {
+                        setNewSetName(event.target.value)
+                        setSaveError('')
+                      },
+                      onKeyDown: (event) => {
+                        if (event.key === 'Enter') saveAs()
+                      },
+                      'aria-label': '翻译集名称',
+                      'aria-invalid': saveError ? 'true' : undefined,
                     }),
+                    saveError ? h('span', { style: styles.inlineError }, saveError) : null,
+                  ),
+                  h(
+                    'button',
+                    {
+                      style: styles.chevronButton,
+                      onClick: () => setDescOpen((value) => !value),
+                      title: '添加描述',
+                      'aria-expanded': descOpen,
+                    },
+                    descOpen ? '▴' : '▾',
+                  ),
+                  h(
+                    'button',
+                    { style: styles.primaryButton, onClick: saveAs },
+                    h(
+                      'svg',
+                      {
+                        width: 13,
+                        height: 13,
+                        viewBox: '0 0 24 24',
+                        fill: 'none',
+                        stroke: 'currentColor',
+                        strokeWidth: 2.4,
+                        strokeLinecap: 'round',
+                        strokeLinejoin: 'round',
+                      },
+                      h('polyline', { points: '20 6 9 17 4 12' }),
+                    ),
+                    '保存',
+                  ),
+                  h(
+                    PopLayer,
+                    { open: descOpen, style: styles.descPopover },
+                    h(
+                      'div',
+                      { style: { fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)', marginBottom: 6 } },
+                      '翻译集描述（可选）',
+                    ),
+                    h('textarea', {
+                      style: styles.textarea,
+                      rows: 2,
+                      placeholder: '给这个翻译集写一句描述，会显示在翻译集列表里',
+                      value: newSetDesc,
+                      onChange: (event) => setNewSetDesc(event.target.value),
+                    }),
+                  ),
+                  ),
+                  h(
+                    'button',
+                    {
+                      style: styles.iconButton,
+                      onClick: () => setDialogOpen(true),
+                      title: '翻译集列表',
+                      'aria-label': '翻译集列表',
+                    },
+                    h(
+                      'svg',
+                      {
+                        width: 16,
+                        height: 16,
+                        viewBox: '0 0 24 24',
+                        fill: 'none',
+                        stroke: 'currentColor',
+                        strokeWidth: 2,
+                        strokeLinecap: 'round',
+                        strokeLinejoin: 'round',
+                      },
+                      h('path', { d: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z' }),
+                      h('polyline', { points: '14 2 14 8 20 8' }),
+                    ),
+                  ),
+                  h(
+                    'span',
+                    { style: styles.empty },
+                    `临时集 ${translatedCount} 个字段${WORKING.source ? ` · 来自「${currentLabel}」` : ''}`,
+                  ),
+                ),
+                notice ? h('div', { style: styles.notice }, notice) : null,
+                error ? h('div', { style: styles.empty }, `加载失败：${error}`) : null,
+                h(
+                  'table',
+                  { style: styles.table },
+                  h(
+                    'thead',
+                    null,
+                    h('tr', null, h('th', { style: styles.th }, '英文关键字段'), h('th', { style: styles.th }, '中文（自定义）')),
+                  ),
+                  h(
+                    'tbody',
+                    null,
+                    filtered.map((key) =>
+                      h(
+                        'tr',
+                        { key },
+                        h('td', { style: styles.td }, key),
+                        h(
+                          'td',
+                          { style: styles.td },
+                          h('input', {
+                            style: styles.input,
+                            value: TRANSLATIONS[key] || '',
+                            placeholder: '留空则不追加',
+                            onChange: (event) => setValue(key, event.target.value),
+                            'aria-label': `翻译 ${key}`,
+                          }),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                filtered.length === 0 ? h('div', { style: { ...styles.empty, marginTop: 10 } }, '没有匹配的字段。') : null,
+              ),
+        ),
+          showBackTop
+            ? h(
+                'button',
+                {
+                  style: styles.backTop,
+                  onClick: () => {
+                    const element = bodyRef.current
+                    if (element) element.scrollTo({ top: 0, behavior: 'smooth' })
+                  },
+                  title: '回到顶部',
+                  'aria-label': '回到顶部',
+                },
+                '↑',
+              )
+            : null,
+        dialogOpen
+          ? h(
+              'div',
+              { style: styles.overlay, onClick: () => setDialogOpen(false) },
+              h(
+                'div',
+                {
+                  style: styles.overlayInner,
+                  onClick: (event) => event.stopPropagation(),
+                  role: 'dialog',
+                  'aria-label': '翻译集列表',
+                },
+                h(
+                  'div',
+                  { style: styles.overlayHead },
+                  h('div', { style: { fontSize: 14, fontWeight: 600 } }, '翻译集'),
+                  h('span', { style: styles.empty }, '点选即载入临时集；删除只影响命名集'),
+                  h(
+                    'button',
+                    { style: styles.iconButton, onClick: () => setDialogOpen(false), 'aria-label': '关闭' },
+                    '×',
+                  ),
+                ),
+                h(
+                  'div',
+                  { style: styles.overlayList },
+                  setItems.map((item, index) =>
+                    h(
+                      'div',
+                      {
+                        key: item.id,
+                        className: 'rw-set-row',
+                        style: { ...styles.setRow, animationDelay: `${index * 25}ms` },
+                        onClick: () => loadSet(item.id),
+                      },
+                      h(
+                        'div',
+                        { style: styles.setRowMain },
+                        h(
+                          'div',
+                          { style: styles.setRowName },
+                          item.name,
+                          item.current ? h('span', { style: styles.currentBadge }, '当前') : null,
+                        ),
+                        h('div', { style: styles.setRowDesc }, item.description),
+                        h('div', { style: styles.setRowMeta }, `${item.count} 个字段`),
+                      ),
+                      item.deletable
+                        ? h(
+                            'button',
+                            {
+                              style: styles.setDelete,
+                              onClick: (event) => {
+                                event.stopPropagation()
+                                deleteSet(item.id)
+                              },
+                            },
+                            '删除',
+                          )
+                        : h('span', { style: styles.setLocked }, '只读'),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-          filtered.length === 0 ? h('div', { style: { ...styles.empty, marginTop: 10 } }, '没有匹配的字段。') : null,
-            ),
+            )
+          : null,
         ),
       )
     }
